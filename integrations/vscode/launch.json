@@ -1,0 +1,56 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Attach to CHERIoT guest",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${input:guestElf}",
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "${input:gdbPath}",
+      "miDebuggerServerAddress": "${input:endpoint}",
+      "stopAtConnect": true,
+      "launchCompleteCommand": "None",
+      "externalConsole": false,
+      "sourceFileMap": {
+        ".": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Attach to RV32 guest",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${input:guestElf}",
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "${input:gdbPath}",
+      "miDebuggerServerAddress": "${input:endpoint}",
+      "stopAtConnect": true,
+      "launchCompleteCommand": "None",
+      "externalConsole": false,
+      "sourceFileMap": {
+        "": "${workspaceFolder}/"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "guestElf",
+      "type": "promptString",
+      "description": "Absolute path to the guest ELF; must match the running guest"
+    },
+    {
+      "id": "gdbPath",
+      "type": "promptString",
+      "description": "Path to multiarch GDB",
+      "default": "/usr/bin/gdb-multiarch"
+    },
+    {
+      "id": "endpoint",
+      "type": "promptString",
+      "description": "Running emulator loopback IP:port",
+      "default": "127.0.0.1:333"
+    }
+  ]
+}

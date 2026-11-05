@@ -1,0 +1,92 @@
+{
+    "devices": {
+        "clint": {
+            "start": 33554432,
+            "length": 786432
+        },
+        "plic": {
+            "start": 201326592,
+            "length": 16
+        },
+        "uart": {
+            "start": 268435456,
+            "length": 256
+        },
+        "spi": {
+            "start": 268439552,
+            "length": 24
+        },
+        "i2c": {
+            "start": 268443648,
+            "length": 24
+        },
+        "gpio": {
+            "start": 268447744,
+            "length": 20
+        },
+        "ethernet": {
+            "start": 536870912,
+            "length": 36
+        },
+        "storage": {
+            "start": 805306368,
+            "length": 24
+        },
+        "shadow": {
+            "start": 2197815296,
+            "length": 4096
+        }
+    },
+    "instruction_memory": {
+        "start": 2147483648,
+        "end": 2147745792
+    },
+    "heap": {
+        "end": 2147745792
+    },
+    "interrupts": [
+        {
+            "name": "GpioInterrupt",
+            "number": 2,
+            "priority": 2,
+            "edge_triggered": false
+        },
+        {
+            "name": "SpiInterrupt",
+            "number": 3,
+            "priority": 2,
+            "edge_triggered": false
+        },
+        {
+            "name": "I2cInterrupt",
+            "number": 4,
+            "priority": 2,
+            "edge_triggered": false
+        },
+        {
+            "name": "EthernetInterrupt",
+            "number": 5,
+            "priority": 2,
+            "edge_triggered": false
+        },
+        {
+            "name": "StorageInterrupt",
+            "number": 6,
+            "priority": 2,
+            "edge_triggered": false
+        }
+    ],
+    "defines": [
+        "RISCV_HTIF"
+    ],
+    "driver_includes": [
+        "${sdk}/include/platform/cheriot-vm",
+        "${sdk}/include/platform/generic-riscv"
+    ],
+    "timer_hz": 2000,
+    "tickrate_hz": 10,
+    "revoker": "software",
+    "run_command": "cheriot-vm-rtos",
+    "simulation": true,
+    "cpu": "cheriot"
+}

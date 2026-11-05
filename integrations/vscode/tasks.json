@@ -1,0 +1,55 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "CHERIoT VM: Start guest debugger",
+      "type": "process",
+      "command": "${input:emulator}",
+      "args": [
+        "--profile",
+        "${input:profile}",
+        "--elf",
+        "${input:guestElf}",
+        "--gdb",
+        "ip=${input:gdbIp},port=${input:gdbPort}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "emulator",
+      "type": "promptString",
+      "description": "Absolute path to the GDB-enabled cheriot-vm executable"
+    },
+    {
+      "id": "profile",
+      "type": "promptString",
+      "description": "Absolute path to the matching machine profile"
+    },
+    {
+      "id": "guestElf",
+      "type": "promptString",
+      "description": "Absolute path to the guest ELF (use the same file when attaching)"
+    },
+    {
+      "id": "gdbIp",
+      "type": "promptString",
+      "description": "Loopback IP address",
+      "default": "127.0.0.1"
+    },
+    {
+      "id": "gdbPort",
+      "type": "promptString",
+      "description": "Debugger port",
+      "default": "333"
+    }
+  ]
+}

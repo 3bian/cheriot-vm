@@ -1,0 +1,5 @@
+# Copyright 3bian Limited and Contributors
+# SPDX-License-Identifier: MIT
+
+edition = "2021"
+max_width = 100
