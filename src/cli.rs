@@ -66,7 +66,7 @@ pub(crate) fn execute_cli() -> Result<(), EmulatorError> {
     let mut configuration = MachineConfiguration::parse(profile)?;
     if let Some(selection) = &registers {
         selection.validate(
-            configuration.is_cheriot1(),
+            configuration.is_cheriot(),
             configuration.processor_profile.embedded,
         )?;
     }
@@ -74,19 +74,19 @@ pub(crate) fn execute_cli() -> Result<(), EmulatorError> {
         configuration.completion = completion;
     }
     let firmware = read_file(firmware_path, MAX_FIRMWARE_BYTES, "firmware")?;
-    if configuration.is_cheriot1() {
+    if configuration.is_cheriot() {
         let mut system = if firmware_is_elf {
-            configuration.build_cheriot1(&firmware)?
+            configuration.build_cheriot(&firmware)?
         } else {
-            configuration.build_cheriot1_raw(raw_address, &firmware)?
+            configuration.build_cheriot_raw(raw_address, &firmware)?
         };
         let uart =
             crate::cli::host_bindings::connect(&mut system.computer.bus, host, gdb.is_some())?;
         #[cfg(all(feature = "gdb", target_os = "linux"))]
         if let Some(address) = gdb {
-            return run::debugger::run_cheriot1(system, address, steps, gdb_raw_output, uart);
+            return run::debugger::run_cheriot(system, address, steps, gdb_raw_output, uart);
         }
-        let (system, _) = run::cheriot1::run_with_options(
+        let (system, _) = run::cheriot::run_with_options(
             system,
             RunOptions {
                 uart,

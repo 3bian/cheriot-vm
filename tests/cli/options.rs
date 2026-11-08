@@ -165,6 +165,7 @@ fn obsolete_long_flags_are_rejected() {
         "--gpio-lines",
         "--gdb-ip",
         "--gdb-port",
+        "--timing",
     ] {
         let error = Options::parse(&arguments(&[flag, "unused"]))
             .err()

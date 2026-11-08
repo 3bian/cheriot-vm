@@ -22,6 +22,8 @@ fn buffered_output_preserves_bytes_across_full_buffers_and_final_flush() {
 fn dedicated_uart_output_keeps_other_kinds_on_their_presented_destination() {
     for (presentation, expected) in [
         (OutputPresentation::Compatibility, b"H\x1b".as_slice()),
+        #[cfg(all(feature = "gdb", target_os = "linux"))]
+        (OutputPresentation::DebuggerEscaped, b"H\\x1b"),
         (OutputPresentation::Escaped, b"HTIF [tohost]: H\\x1b\n"),
         (OutputPresentation::Labelled, b"HTIF [tohost]: H\x1b\n"),
         (OutputPresentation::Raw, b"H\x1b"),
@@ -47,6 +49,25 @@ fn dedicated_uart_output_keeps_other_kinds_on_their_presented_destination() {
         drop(output);
         std::fs::remove_file(path).unwrap();
     }
+}
+
+#[cfg(all(feature = "gdb", target_os = "linux"))]
+#[test]
+fn debugger_escaping_preserves_printable_bytes_and_encodes_controls() {
+    let mut output = GuestOutput::new(Vec::new());
+    output
+        .present(
+            "UART",
+            "uart0",
+            b"\0\t\n\r\x1b !\"'\\~\x7f\x80\xff",
+            OutputPresentation::DebuggerEscaped,
+        )
+        .unwrap();
+    output.flush().unwrap();
+    assert_eq!(
+        output.writer.get_ref(),
+        b"\\x00\t\n\\x0d\\x1b !\"'\\~\\x7f\\x80\\xff"
+    );
 }
 
 #[test]

@@ -5,7 +5,7 @@ use cheriot_vm::devices::uart::Uart;
 use std::fs;
 use std::process::Command;
 
-use cheriot_vm::cheriot1::Cheriot1System;
+use cheriot_vm::cheriot::CheriotSystem;
 use cheriot_vm::memory::Tagging;
 use cheriot_vm::MachineConfiguration;
 
@@ -55,7 +55,7 @@ fn uart_16550_registers_and_cli_output_work_on_an_integer_profile() {
 #[test]
 fn default_cheriot_system_uses_consistent_device_names() {
     let system =
-        Cheriot1System::from_elf(include_bytes!("../../examples/hello_world/hello_world.elf"))
+        CheriotSystem::from_elf(include_bytes!("../../examples/hello_world/hello_world.elf"))
             .unwrap();
     let names: Vec<_> = system
         .computer
@@ -90,7 +90,7 @@ fn named_devices_and_memory_preserve_interleaved_source_order() {
         [[uart]]\nname='third'\nbase=0x3000\n\
         [[timer32]]\nname='fourth'\nbase=0x4000\n\
         [[gpio]]\nname='fifth'\nbase=0x5000\n\
-        [[cheriot1-memory]]\nname='tagged'\ntype='ram'\nbase=0x8000\nsize=4096\n\
+        [[cheriot-memory]]\nname='tagged'\ntype='ram'\nbase=0x8000\nsize=4096\n\
         [[memory]]\nname='last'\ntype='rom'\nbase=0x9000\nsize=4096\n"
     );
     let configuration = MachineConfiguration::parse(&text).unwrap();
@@ -112,7 +112,7 @@ fn named_devices_and_memory_preserve_interleaved_source_order() {
         memory,
         [
             ("ram", Tagging::None),
-            ("tagged", Tagging::Cheriot1),
+            ("tagged", Tagging::Cheriot),
             ("last", Tagging::None)
         ]
     );
@@ -158,7 +158,7 @@ fn obsolete_ambiguous_and_unsupported_sections_are_rejected() {
         "[[gpio]]\nname='pins'\nbase=0x1000\nkind='uart'\n",
         "[[uart]]\nname='missing-base'\n",
         "[uart]\nname='not-an-array'\nbase=0x1000\n",
-        "[[memory]]\nname='old-tags'\ntype='ram'\nbase=0x1000\nsize=8\ntagging='cheriot1'\n",
+        "[[memory]]\nname='old-tags'\ntype='ram'\nbase=0x1000\nsize=8\ntagging='cheriot'\n",
     ] {
         assert!(
             MachineConfiguration::parse(&format!("{BASE}\n{section}")).is_err(),
@@ -187,10 +187,7 @@ fn input_on_one_uart_and_output_on_another_are_independent() {
         0x0021_a023,
         0x0010_0073,
     ];
-    let bytes: Vec<_> = instructions
-        .into_iter()
-        .flat_map(u32::to_le_bytes)
-        .collect();
+    let bytes: Vec<_> = crate::firmware_words::firmware_from_words(&instructions);
 
     fs::write(&profile, configuration).unwrap();
     fs::write(&firmware, bytes).unwrap();
@@ -260,10 +257,7 @@ fn supplied_profiles_use_consistent_names_and_device_order() {
         ("storage", "storage0"),
     ];
     let profiles = [
-        (
-            include_str!("../../profiles/cheriot1.toml"),
-            cheriot_devices,
-        ),
+        (include_str!("../../profiles/cheriot.toml"), cheriot_devices),
         (include_str!("../../profiles/rv32e.toml"), integer_devices),
         (include_str!("../../profiles/rv32imc.toml"), integer_devices),
     ];

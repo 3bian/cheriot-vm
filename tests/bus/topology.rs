@@ -39,7 +39,7 @@ impl Device for CountedActivity {
 fn attaching_modified_detached_memory_revalidates_address_and_tag_invariants() {
     let mut bus = Bus::new();
     let mut memory =
-        MemoryRegion::new("ram".into(), 0, 16, MemoryKind::Ram, Tagging::Cheriot1).unwrap();
+        MemoryRegion::new("ram".into(), 0, 16, MemoryKind::Ram, Tagging::Cheriot).unwrap();
     memory.base = 1;
     assert!(bus.add_memory(memory).is_err());
     assert!(bus.memory().is_empty());

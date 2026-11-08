@@ -26,13 +26,16 @@ impl RunControl {
 
     pub fn before_step(&mut self, address: u32, attempted_steps: u64) -> Option<StopReason> {
         let bypass = self.bypass.take() == Some(address);
-        if self
-            .breakpoints
-            .iter()
-            .any(|(location, _, _)| *location == address)
-            && !bypass
-        {
-            return Some(StopReason::Breakpoint(address));
+        if !bypass {
+            for kind in [BreakpointType::Software, BreakpointType::Hardware] {
+                if self
+                    .breakpoints
+                    .iter()
+                    .any(|(location, registered, _)| *location == address && *registered == kind)
+                {
+                    return Some(StopReason::Breakpoint(address, kind));
+                }
+            }
         }
         self.maximum_steps
             .filter(|limit| attempted_steps >= *limit)
@@ -49,10 +52,10 @@ impl RunControl {
     ) -> bool {
         if !address.is_multiple_of(alignment)
             || !(kind == 4 || (kind == 2 && alignment == 2))
-            || !bus
-                .memory()
-                .iter()
-                .any(|region| region.executable && region.contains(address, kind))
+            || address.checked_add((kind - 1) as u32).is_none()
+            || (0..kind)
+                .step_by(2)
+                .any(|offset| bus.fetch(address + offset as u32, 2).is_err())
             || (self.breakpoints.len() == 64
                 && !self.breakpoints.contains(&(address, breakpoint, kind)))
         {
@@ -93,7 +96,7 @@ impl RunControl {
                 "debugger signal injection is unsupported".into(),
             ));
         }
-        if let StopReason::Breakpoint(address) = reason {
+        if let StopReason::Breakpoint(address, _) = reason {
             self.bypass = Some(address);
         }
         *current = next;

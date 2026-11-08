@@ -18,7 +18,7 @@ fn little_endian_and_rom() {
 #[test]
 fn ordinary_and_dma_writes_clear_tags() {
     let mut memory =
-        MemoryRegion::new("ram".into(), 0, 32, MemoryKind::Ram, Tagging::Cheriot1).unwrap();
+        MemoryRegion::new("ram".into(), 0, 32, MemoryKind::Ram, Tagging::Cheriot).unwrap();
     memory.mark_tag_for_test(8);
     memory.mark_tag_for_test(16);
     memory.write(15, 2, 42).unwrap();

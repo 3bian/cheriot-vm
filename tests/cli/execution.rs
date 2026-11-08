@@ -88,7 +88,7 @@ fn invalid_arguments_and_firmware_fail_cleanly() {
         ],
         vec![
             "--profile",
-            "profiles/cheriot1.toml",
+            "profiles/cheriot.toml",
             "--raw",
             "examples/assembly/compressed.bin",
             "--address",
@@ -176,10 +176,7 @@ fn integer_uart_output_is_drained_during_unlimited_execution() {
         0x100000b7, 0x000101b7, 0x00118193, 0x04100113, 0x0020a023, 0xfff18193, 0xfe019ce3,
         0x00100073,
     ];
-    let bytes: Vec<_> = instructions
-        .into_iter()
-        .flat_map(u32::to_le_bytes)
-        .collect();
+    let bytes: Vec<_> = crate::firmware_words::firmware_from_words(&instructions);
     fs::write(&firmware, bytes).unwrap();
 
     let text = output(&[
@@ -286,7 +283,7 @@ fn named_register_lists_show_only_available_selected_registers() {
             "c1",
         ),
         (
-            "cheriot1",
+            "cheriot",
             "c0+c15+pcc",
             vec!["c00:", "c15:", "PCC:"],
             vec!["c01:", "MTCC:"],

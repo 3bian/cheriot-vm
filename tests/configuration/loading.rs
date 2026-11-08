@@ -162,7 +162,7 @@ fn required_properties_resource_limits_and_profile_consistency() {
             "type = \"rv32imc\"",
             "type = \"rv32imc\"\n[processor.instruction_groups]\ncompressed = false",
         ),
-        PROFILE.replace("type = \"rv32imc\"", "type = \"cheriot1\""),
+        PROFILE.replace("type = \"rv32imc\"", "type = \"cheriot\""),
         PROFILE.replace("base = 0x10000000", "base = 0x80000004"),
     ] {
         assert!(invalid(&text), "{text}");
@@ -184,7 +184,7 @@ fn required_properties_resource_limits_and_profile_consistency() {
         matches!(result, Err(cheriot_vm::EmulatorError::Configuration(message)) if message.contains("backing"))
     );
     let mut configuration = MachineConfiguration::parse(PROFILE).unwrap();
-    configuration.processor_type = "cheriot1".into();
+    configuration.processor_type = "cheriot".into();
     assert!(configuration.build(BASE).is_err());
     assert!(MachineConfiguration::parse(PROFILE)
         .unwrap()
@@ -246,7 +246,7 @@ fn runnable_raw_builders_validate_storage_and_minimum_fetch_without_restricting_
     for text in [
         PROFILE,
         include_str!("../../profiles/rv32e.toml"),
-        include_str!("../../profiles/cheriot1.toml"),
+        include_str!("../../profiles/cheriot.toml"),
     ] {
         let alignment = MachineConfiguration::parse(text)
             .unwrap()
@@ -264,8 +264,8 @@ fn runnable_raw_builders_validate_storage_and_minimum_fetch_without_restricting_
             ),
         ] {
             let config = MachineConfiguration::parse(&config).unwrap();
-            let result = if config.is_cheriot1() {
-                config.build_cheriot1_raw(address, &bytes).map(|_| ())
+            let result = if config.is_cheriot() {
+                config.build_cheriot_raw(address, &bytes).map(|_| ())
             } else {
                 config.build_raw(address, &bytes).map(|_| ())
             };

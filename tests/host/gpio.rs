@@ -6,8 +6,8 @@ use std::io;
 use std::path::Path;
 use std::rc::Rc;
 
-use cheriot_vm::cheriot1::StepOutcome;
-use cheriot_vm::cheriot1::{permissions, Capability};
+use cheriot_vm::cheriot::StepOutcome;
+use cheriot_vm::cheriot::{permissions, Capability};
 use cheriot_vm::devices::gpio::{Gpio, LineTransport};
 use cheriot_vm::devices::{Device, InterruptLine};
 use cheriot_vm::host::gpio::linux;
@@ -78,9 +78,9 @@ fn capability_checks_precede_host_gpio_access_and_preserve_state_on_fault() {
     ];
 
     for (authority, instruction, cause, value) in cases {
-        let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot1.toml"))
+        let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot.toml"))
             .unwrap()
-            .build_cheriot1_raw(0x80000000, &instruction.to_le_bytes())
+            .build_cheriot_raw(0x80000000, &instruction.to_le_bytes())
             .unwrap();
         let (device, state) = host_device();
         *system.computer.bus.device_mut::<Gpio>("gpio0").unwrap() = device;
@@ -134,13 +134,10 @@ fn capability_checks_precede_host_gpio_access_and_preserve_state_on_fault() {
 #[test]
 fn cheriot_guest_drives_outputs_and_reads_input_through_a_bounded_capability() {
     let instructions: [u32; 4] = [0x0020a223, 0x0020a423, 0x0000a183, 0x0000a403];
-    let bytes: Vec<_> = instructions
-        .iter()
-        .flat_map(|word| word.to_le_bytes())
-        .collect();
-    let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot1.toml"))
+    let bytes: Vec<_> = crate::firmware_words::firmware_from_words(&instructions);
+    let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot.toml"))
         .unwrap()
-        .build_cheriot1_raw(0x80000000, &bytes)
+        .build_cheriot_raw(0x80000000, &bytes)
         .unwrap();
     let (device, state) = host_device();
     *system.computer.bus.device_mut::<Gpio>("gpio0").unwrap() = device;
@@ -257,17 +254,15 @@ fn host_gpio_failures_are_sticky_and_do_not_commit_output_registers() {
 #[test]
 fn asynchronous_host_gpio_failure_stops_cheriot_with_diagnostics() {
     let bytes = [0x13, 0, 0, 0].repeat(100);
-    let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot1.toml"))
+    let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot.toml"))
         .unwrap()
-        .build_cheriot1_raw(0x80000000, &bytes)
+        .build_cheriot_raw(0x80000000, &bytes)
         .unwrap();
+    system.computer.timing = cheriot_vm::TimingPolicy::PerStep;
+    system.computer.set_steps_per_tick(1).unwrap();
     let (device, state) = host_device();
     *system.computer.bus.device_mut::<Gpio>("gpio0").unwrap() = device;
     state.borrow_mut().fail_read = true;
-
-    for _ in 0..99 {
-        system.step().unwrap();
-    }
 
     let error = system.step().unwrap_err().to_string();
     assert!(error.contains("gpio0"), "{error}");

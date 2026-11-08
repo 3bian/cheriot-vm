@@ -33,14 +33,7 @@ pub trait Device: Any {
     fn read(&mut self, offset: u32, width: usize) -> Result<u32, EmulatorError>;
     fn write(&mut self, offset: u32, width: usize, value: u32) -> Result<(), EmulatorError>;
     fn tick(&mut self, _ticks: u64) {}
-
-    fn advance_time_without_dispatch(&mut self, ticks: u64) {
-        self.tick(ticks);
-    }
-
-    fn ticks_until_interrupt(&self) -> Option<u64> {
-        None
-    }
+    fn poll_host_inputs(&mut self) {}
 
     fn host_error(&self) -> Option<&str> {
         None

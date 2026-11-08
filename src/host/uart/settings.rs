@@ -61,7 +61,8 @@ impl UartSettings {
                 | ControlFlags::PARENB
                 | ControlFlags::PARODD
                 | ControlFlags::CSTOPB
-                | ControlFlags::CRTSCTS,
+                | ControlFlags::CRTSCTS
+                | ControlFlags::from_bits_retain(nix::libc::CMSPAR),
         );
         settings.control_flags.insert(
             ControlFlags::CLOCAL
@@ -101,6 +102,10 @@ impl UartSettings {
         Ok(())
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "../../../tests/host/uart/settings.rs"]
+mod tests;
 
 #[cfg(target_os = "linux")]
 fn baud_rate(baud: u32) -> Option<nix::sys::termios::BaudRate> {

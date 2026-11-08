@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use cheriot_vm::cheriot1::{permissions, Capability, StepOutcome};
+use cheriot_vm::cheriot::{permissions, Capability, StepOutcome};
 use cheriot_vm::devices::InterruptLine;
 use cheriot_vm::host::gpio::linux;
 use cheriot_vm::host::HostConnections;
@@ -50,13 +50,10 @@ fn linux_gpio_character_device_reads_drives_and_releases_selected_lines() {
     set_pull(3, false);
 
     let instructions = [0x0020_a223_u32, 0x0020_a423, 0x0000_a183];
-    let bytes: Vec<_> = instructions
-        .into_iter()
-        .flat_map(u32::to_le_bytes)
-        .collect();
-    let mut system = MachineConfiguration::parse(include_str!("../../../profiles/cheriot1.toml"))
+    let bytes: Vec<_> = crate::firmware_words::firmware_from_words(&instructions);
+    let mut system = MachineConfiguration::parse(include_str!("../../../profiles/cheriot.toml"))
         .unwrap()
-        .build_cheriot1_raw(0x8000_0000, &bytes)
+        .build_cheriot_raw(0x8000_0000, &bytes)
         .unwrap();
     HostConnections {
         gpio_chip: Some(("gpio0".into(), chip.to_str().unwrap().into())),

@@ -11,7 +11,7 @@ use crate::EmulatorError;
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum DefaultDevices {
-    Cheriot1Compatibility,
+    CheriotCompatibility,
     Configured,
 }
 

@@ -4,7 +4,7 @@
 use std::io::{self, Write};
 
 use crate::bus::Bus;
-use crate::cheriot1::Cheriot1System;
+use crate::cheriot::CheriotSystem;
 use crate::devices::ethernet::Ethernet;
 use crate::devices::gpio::Gpio;
 use crate::devices::i2c::I2c;
@@ -20,7 +20,7 @@ use crate::processor::{MachineRegisters, ProcessorProfile};
 use crate::rv32::computer::Computer;
 use crate::TimingPolicy;
 
-pub const CHECKPOINT_MAGIC: &[u8; 8] = b"CHKP0002";
+pub const CHECKPOINT_MAGIC: &[u8; 8] = b"CHKP0004";
 pub const CHECKPOINT_OMITTED_STATE: u32 = 0x1f;
 
 impl Computer {
@@ -30,7 +30,14 @@ impl Computer {
             false,
             self.processor.profile,
             self.timing,
+            self.timer_hz(),
             u8::from(self.trap_policy == TrapPolicy::Vector),
+        )?;
+        write_step_clock(
+            output,
+            self.timing,
+            self.steps_per_tick(),
+            self.step_phase(),
         )?;
         write_completion_configuration(
             output,
@@ -52,7 +59,7 @@ impl Computer {
     }
 }
 
-pub(crate) fn write_cheriot1(system: &Cheriot1System, output: &mut impl Write) -> io::Result<()> {
+pub(crate) fn write_cheriot(system: &CheriotSystem, output: &mut impl Write) -> io::Result<()> {
     let computer = &system.computer;
     let processor = &computer.processor;
     write_header(
@@ -65,7 +72,14 @@ pub(crate) fn write_cheriot1(system: &Cheriot1System, output: &mut impl Write) -
             multiply_divide: true,
         },
         computer.timing,
+        computer.timer_hz(),
         2,
+    )?;
+    write_step_clock(
+        output,
+        computer.timing,
+        computer.steps_per_tick(),
+        computer.step_phase(),
     )?;
     write_completion_configuration(
         output,
@@ -164,6 +178,7 @@ fn write_header(
     capability: bool,
     profile: ProcessorProfile,
     timing: TimingPolicy,
+    timer_hz: u32,
     trap_policy: u8,
 ) -> io::Result<()> {
     let profile_id = if capability {
@@ -182,13 +197,14 @@ fn write_header(
         u8::from(capability),
         profile_id,
         flags,
-        u8::from(timing == TimingPolicy::Cheriot1Compatible),
+        timing.checkpoint_id(),
         profile.register_count() as u8,
         if capability { 16 } else { 8 },
         trap_policy,
         0,
     ])?;
-    output.write_all(&CHECKPOINT_OMITTED_STATE.to_le_bytes())
+    output.write_all(&CHECKPOINT_OMITTED_STATE.to_le_bytes())?;
+    output.write_all(&timer_hz.to_le_bytes())
 }
 
 fn write_machine(
@@ -221,6 +237,21 @@ fn write_machine(
         output.write_all(&word.to_le_bytes())?;
     }
     Ok(())
+}
+
+fn write_step_clock(
+    output: &mut impl Write,
+    timing: TimingPolicy,
+    period: u32,
+    phase: u32,
+) -> io::Result<()> {
+    let (period, phase) = if timing == TimingPolicy::PerStep {
+        (period, phase)
+    } else {
+        (1, 0)
+    };
+    output.write_all(&period.to_le_bytes())?;
+    output.write_all(&phase.to_le_bytes())
 }
 
 fn write_string(output: &mut impl Write, value: &str) -> io::Result<()> {

@@ -22,7 +22,7 @@ fn encode_branch(first: u32, second: u32, offset: i32, not_equal: bool) -> u32 {
 }
 
 fn echo_program(profile: &str, length: usize) -> Vec<u8> {
-    let mut words = if profile == "cheriot1" {
+    let mut words = if profile == "cheriot" {
         vec![0x03d0_00db, 0x1000_0137, 0x2020_80db]
     } else {
         vec![0x1000_00b7]
@@ -32,7 +32,7 @@ fn echo_program(profile: &str, length: usize) -> Vec<u8> {
         (((length as u32 + 0x800) >> 12) << 12) | 0x2b7,
         (((length as u32) & 0xfff) << 20) | 0x28293,
     ]);
-    let status = if profile == "cheriot1" { 0x14 } else { 4 };
+    let status = if profile == "cheriot" { 0x14 } else { 4 };
     words.extend([
         (status << 20) | 0xa103,
         0x0011_7113,
@@ -43,7 +43,7 @@ fn echo_program(profile: &str, length: usize) -> Vec<u8> {
         encode_branch(3, 5, -24, true),
         0x0010_0073,
     ]);
-    words.into_iter().flat_map(u32::to_le_bytes).collect()
+    crate::firmware_words::firmware_from_words(&words)
 }
 
 fn run_guest(
@@ -73,7 +73,7 @@ fn run_guest(
             "--address",
             "0x80000000",
             "--uart",
-            if profile == "cheriot1" {
+            if profile == "cheriot" {
                 "device=uart0,in=/dev/stdin"
             } else {
                 "in=/dev/stdin"
@@ -124,7 +124,7 @@ fn run_guest(
 
 #[test]
 fn delayed_stdin_streams_more_than_a_fifo_without_losing_bytes() {
-    for profile in ["rv32e", "rv32imc", "cheriot1"] {
+    for profile in ["rv32e", "rv32imc", "cheriot"] {
         let payload: Vec<_> = (0..8193).map(|n| (n % 256) as u8).collect();
         let (success, output, errors) = run_guest(profile, Some(payload.clone()), false, "0");
         assert!(success, "{profile}: {errors}");
@@ -153,7 +153,7 @@ fn regular_file_input_streams_more_than_a_fifo() {
     let firmware = directory.join("echo.bin");
     let payload: Vec<_> = (0..8193).map(|index| (index % 256) as u8).collect();
     fs::write(&input, &payload).unwrap();
-    for profile in ["cheriot1", "rv32e", "rv32imc"] {
+    for profile in ["cheriot", "rv32e", "rv32imc"] {
         fs::write(&firmware, echo_program(profile, payload.len())).unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_cheriot-vm"))
             .args([

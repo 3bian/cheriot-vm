@@ -6,12 +6,22 @@ use std::any::Any;
 use crate::devices::{register_width, Device, DeviceActivity, InterruptLine};
 use crate::error::EmulatorError;
 
-#[derive(Default)]
 pub struct Timer64 {
     compare_value: u64,
     software_interrupt_pending: bool,
     time: u64,
     timer_interrupt_pending: bool,
+}
+
+impl Default for Timer64 {
+    fn default() -> Self {
+        Self {
+            compare_value: 0,
+            software_interrupt_pending: false,
+            time: 0,
+            timer_interrupt_pending: true,
+        }
+    }
 }
 
 impl Timer64 {
@@ -26,10 +36,6 @@ impl Device for Timer64 {
             host_errors: false,
             interrupt_lines: &[InterruptLine::MachineSoftware, InterruptLine::MachineTimer],
         }
-    }
-
-    fn advance_time_without_dispatch(&mut self, ticks: u64) {
-        self.time = self.time.wrapping_add(ticks);
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -76,10 +82,6 @@ impl Device for Timer64 {
     fn tick(&mut self, ticks: u64) {
         self.time = self.time.wrapping_add(ticks);
         self.timer_interrupt_pending = self.time >= self.compare_value;
-    }
-
-    fn ticks_until_interrupt(&self) -> Option<u64> {
-        Some(self.compare_value.saturating_sub(self.time))
     }
 
     fn write(&mut self, offset: u32, width: usize, value: u32) -> Result<(), EmulatorError> {

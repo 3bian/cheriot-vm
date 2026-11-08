@@ -99,23 +99,29 @@ Options:
     Display this help and exit.
 ```
 
-Square brackets mark optional parts; ... means the preceding part may repeat. A + separates list items, and lists may contain just one item. For GDB, KEY is ip, port or output; supply any subset as one comma-separated argument, or omit the argument to use the defaults.
-
-Use --profile with either --elf or --raw. Addresses and counts accept decimal or 0x hexadecimal values. Repeat connection options to connect different devices. Other value-taking options can only be supplied once; repeated --trace switches are harmless. Checkpoints are comparison snapshots, not restore images.
+Use --profile with either --elf or --raw. Addresses and counts accept decimal or 0x hexadecimal values. Repeat connection options to connect different devices. Other value-taking options can only be supplied once; repeated --trace switches are harmless. Checkpoints are comparison snapshots, *not restore images*.
 
 ## Build and Run
 
-Install Rust and Cargo with [rustup](https://github.com/rust-lang/rustup). The rust-toolchain.toml file selects the required toolchain. From this folder, build and run the bundled guest:
+Install Git, then install Rust and Cargo with [rustup](https://github.com/rust-lang/rustup). Clone the VM into a new working folder and build it:
 
 ```sh
+git clone --depth 1 https://github.com/3bian-adam/cheriot-vm ./cheriot-vm
+export CHERIOT_VM="$(cd ./cheriot-vm && pwd)"
+cd "$CHERIOT_VM"
 cargo build --locked --release
+```
+
+The rust-toolchain.toml file selects the required toolchain. Run the bundled guest from the VM folder:
+
+```sh
 ./target/release/cheriot-vm \
   --elf examples/hello_world/hello_world.elf \
-  --profile profiles/cheriot1.toml \
+  --profile profiles/cheriot.toml \
   --steps 1000000
 ```
 
-The program prints Hello world compartment: Hello world and tells the VM when it has finished. The included ELF matches profiles/cheriot1.toml and has debug symbols.
+The program prints Hello world compartment: Hello world and tells the VM when it has finished. The included ELF matches profiles/cheriot.toml and has debug symbols.
 
 To build the VM with guest debugger support, run this in the VM folder:
 
@@ -127,22 +133,22 @@ Cargo builds the VM itself. Build your guest program separately with the compile
 
 ### Build the CHERIoT Examples
 
-The ELF is included, so you only need these steps if you want to rebuild it. You will need Git, xmake, CMake, Ninja, a C/C++ build compiler and a CHERIoT RTOS checkout.
+The ELF is included, so you only need these steps if you want to rebuild it. You will need xmake, CMake, Ninja and a C/C++ build compiler. The following commands place the toolchain and RTOS alongside the VM checkout.
 
-To build the CHERIoT LLVM toolchain from source, run these commands from this folder. The build needs substantial disk space and time:
+To build the CHERIoT LLVM toolchain from source, return to the working folder containing the VM checkout. The build needs substantial disk space and time:
 
 ```sh
-git clone --branch cheriot --single-branch https://github.com/CHERIoT-Platform/llvm-project.git ../cheriot-llvm
-git -C ../cheriot-llvm checkout ee468e7b3ef1e0f8f314c3a4a6cae7b5930d6c13
-cmake -S ../cheriot-llvm/llvm -B ../cheriot-llvm-build -G Ninja \
+cd "$CHERIOT_VM/.."
+git clone --branch cheriot --depth 1 --single-branch https://github.com/CHERIoT-Platform/llvm-project.git ./cheriot-llvm
+cmake -S ./cheriot-llvm/llvm -B ./cheriot-llvm/build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DLLVM_ENABLE_PROJECTS="clang;clang-tools-extra;lld" \
   -DLLVM_TARGETS_TO_BUILD=RISCV \
   -DLLVM_ENABLE_UNWIND_TABLES=OFF \
   -DLLVM_DISTRIBUTION_COMPONENTS="clang;clangd;lld;llvm-objdump;llvm-objcopy" \
-  -DCMAKE_INSTALL_PREFIX="$PWD/../cheriot-tools"
-cmake --build ../cheriot-llvm-build --target install-distribution
-export CHERIOT_TOOLCHAIN="$(cd ../cheriot-tools && pwd)"
+  -DCMAKE_INSTALL_PREFIX="$PWD/cheriot-llvm/build/cheriot-tools"
+cmake --build ./cheriot-llvm/build --target install-distribution
+export CHERIOT_TOOLCHAIN="$(cd ./cheriot-llvm/build/cheriot-tools && pwd)"
 ```
 
 If you already have the CHERIoT LLVM tools, set CHERIOT_TOOLCHAIN to their installation directory instead:
@@ -153,30 +159,47 @@ export CHERIOT_TOOLCHAIN=/absolute/path/to/cheriot-tools
 
 Next, prepare the CHERIoT RTOS checkout and the VM's board support.
 
-For example, from this folder, create a checkout next to it:
+From the same working folder, create the RTOS checkout and install the VM's board support:
 
 ```sh
-git clone --recursive https://github.com/CHERIoT-Platform/cheriot-rtos.git ../cheriot-rtos
-export CHERIOT_RTOS="$(cd ../cheriot-rtos && pwd)"
-cp -a integrations/cheriot-rtos/. "$CHERIOT_RTOS/"
+cd "$CHERIOT_VM/.."
+git clone --recursive https://github.com/CHERIoT-Platform/cheriot-rtos.git ./cheriot-rtos
+export CHERIOT_RTOS="$(cd ./cheriot-rtos && pwd)"
+cp -a "$CHERIOT_VM/integrations/cheriot-rtos/." "$CHERIOT_RTOS/"
 ```
 
 The copy installs the VM's board and drivers into that RTOS checkout. If you already have a checkout, set CHERIOT_RTOS to its absolute path instead.
 
-CHERIOT_TOOLCHAIN is the LLVM installation directory passed to --sdk; it is separate from CHERIOT_RTOS. From this folder:
+CHERIOT_TOOLCHAIN is the LLVM installation directory passed to --sdk; it is separate from CHERIOT_RTOS. Build and run the example:
 
 ```sh
-cd examples/hello_world
+cd "$CHERIOT_VM/examples/hello_world"
 xmake f --clean --board=cheriot-vm --sdk="$CHERIOT_TOOLCHAIN" -m debug -y
 xmake
-cd ../..
+cd "$CHERIOT_VM"
 ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml \
+  --profile profiles/cheriot.toml \
   --elf examples/hello_world/build/cheriot/cheriot/debug/hello_world.elf \
   --steps 1000000
 ```
 
 The build produces hello_world.elf under examples/hello_world/build/cheriot/cheriot/debug/. When debugging it, select that file so the symbols match the program running in the VM.
+
+### Build the RTOS Test Suite
+
+After preparing the RTOS checkout and toolchain above, build its tests for the VM board:
+
+```sh
+cd "$CHERIOT_RTOS/tests"
+xmake f --clean --board=cheriot-vm --sdk="$CHERIOT_TOOLCHAIN" -m release -y
+xmake
+cd "$CHERIOT_VM"
+./target/release/cheriot-vm \
+  --profile profiles/cheriot.toml \
+  --elf "$CHERIOT_RTOS/tests/build/cheriot/cheriot/release/test-suite"
+```
+
+For elapsed-time execution, use the same VM-board build with the custom elapsed-time profile described under Profiles below. *Rebuild existing Sail-board firmware with --board=cheriot-vm first.* Its cycle-counter time helper does not match the elapsed-time scheduler clock and can cause very long sleeps before the exit request is reached.
 
 ### ELF and Raw Firmware
 
@@ -189,7 +212,7 @@ For example, to load your own raw firmware at 0x80000000:
 ```sh
 ./target/release/cheriot-vm \
   --address 0x80000000 \
-  --profile profiles/cheriot1.toml \
+  --profile profiles/cheriot.toml \
   --raw firmware.bin \
   --steps 100000 \
   --trap-policy stop
@@ -197,13 +220,13 @@ For example, to load your own raw firmware at 0x80000000:
 
 Replace firmware.bin with your file. This example stops on an architectural trap and allows up to 100,000 attempted steps; adjust those settings for your program. For source-level debugging, use the matching ELF file when one is available.
 
-Firmware must match the profile's processor, memory and devices. The supplied cheriot-vm board JSON describes the UART and other devices in the cheriot1 profile. The CHERIoT profile uses the 16550 UART register layout.
+Firmware must match the profile's processor, memory and devices. The supplied cheriot-vm board JSON describes the UART and other devices in the cheriot profile. The CHERIoT profile uses the 16550 UART register layout.
 
 Execution is unlimited by default; reaching a step limit reports incomplete execution. HTIF lets a guest report its exit status. For a guest with a tohost symbol:
 
 ```sh
 ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml \
+  --profile profiles/cheriot.toml \
   --elf firmware.elf \
   --completion elf-symbol
 ```
@@ -212,7 +235,7 @@ For a generic ELF without that completion interface:
 
 ```sh
 ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml \
+  --profile profiles/cheriot.toml \
   --elf firmware.elf \
   --completion disabled
 ```
@@ -225,7 +248,7 @@ Start the VM with your profile and guest ELF. For the bundled example:
 
 ```sh
 ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml \
+  --profile profiles/cheriot.toml \
   --elf examples/hello_world/hello_world.elf \
   --gdb
 ```
@@ -234,7 +257,7 @@ With no settings, --gdb listens on 127.0.0.1:333. To choose another port, use:
 
 ```sh
 ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml \
+  --profile profiles/cheriot.toml \
   --elf examples/hello_world/hello_world.elf \
   --gdb port=3333
 ```
@@ -243,7 +266,7 @@ You can also specify both settings:
 
 ```sh
 ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml \
+  --profile profiles/cheriot.toml \
   --elf examples/hello_world/hello_world.elf \
   --gdb ip=127.0.0.1,port=3333
 ```
@@ -265,7 +288,7 @@ Attach within 30 seconds, then set breakpoints or step through instructions:
 (gdb) x/4wx 0x80000000
 ```
 
-Replace the example paths with your own ELF and profile. Attachment leaves the guest paused; the VM has already loaded the program, so do not run GDB's load command. Source breakpoints need the source files recorded in the ELF. For an address breakpoint:
+Replace the example paths with your own ELF and profile. Attachment leaves the guest paused; the VM has already loaded the program, so *do not run GDB's load command*. Source breakpoints need the source files recorded in the ELF. For an address breakpoint:
 
 ```text
 (gdb) break *0x80000004
@@ -280,16 +303,16 @@ Continue, interrupt, instruction stepping, breakpoints, register inspection and 
 
 GDB access to registers and memory is read-only. Native capability-pointer display and full cross-compartment unwinding are not supported.
 
-GDB's detach command resumes the guest. Its kill command terminates the VM. A completed guest ends the debugging session; a debugger stop on its own does not mean that the guest completed successfully.
+GDB's detach command resumes the guest and keeps the selected debugger output mode. Its kill command terminates the VM. A completed guest ends the debugging session; a debugger stop on its own does not mean that the guest completed successfully.
 
 ## Debugging Guest Programs with Visual Studio Code
 
 Follow the guest build and debugger prerequisites above, then install the Microsoft C/C++ extension (ms-vscode.cpptools).
 
 1. Copy the three files from integrations/vscode into a .vscode folder at the root of your guest project, then open that project folder in VS Code. Merge with existing configurations if you already have them.
-2. Choose **Terminal**, then **Run Task**, then **CHERIoT VM: Start guest debugger**. Enter the absolute paths to the VM executable, matching profile and guest ELF. The default endpoint is 127.0.0.1:333.
-3. When the VM reports that it is listening, open **Run and Debug**, select **Attach to CHERIoT guest** or **Attach to RV32 guest**, and press **F5**. Enter the same ELF and endpoint, plus your GDB path, within the 30-second connection window.
-4. Use VS Code's breakpoints, **Continue**, **Pause** and instruction-stepping controls.
+2. Choose *Terminal*, then *Run Task*, then *CHERIoT VM: Start guest debugger*. Enter the absolute paths to the VM executable, matching profile and guest ELF. The default endpoint is 127.0.0.1:333.
+3. When the VM reports that it is listening, open *Run and Debug*, select *Attach to CHERIoT guest* or *Attach to RV32 guest*, and press *F5*. Enter the same ELF and endpoint, plus your GDB path, within the 30-second connection window.
+4. Use VS Code's breakpoints, *Continue*, *Pause* and instruction-stepping controls.
 
 GDB commands in the Debug Console need the -exec prefix:
 
@@ -297,7 +320,7 @@ GDB commands in the Debug Console need the -exec prefix:
 -exec monitor capability pcc
 ```
 
-The task starts the VM; it does not build your guest. If the ELF's source paths differ from your project, adjust sourceFileMap in launch.json. The two attach configurations retain different source mappings for CHERIoT and RV32 guests. Stop the VM task through **Terminal**, then **Terminate Task**, when you finish.
+The task starts the VM; it does not build your guest. If the ELF's source paths differ from your project, adjust sourceFileMap in launch.json. The two attach configurations retain different source mappings for CHERIoT and RV32 guests. Stop the VM task through *Terminal*, then *Terminate Task*, when you finish.
 
 Copied templates passed headless adapter tests with GDB 16.3 and Microsoft C/C++ 1.29.3, including source breakpoints. The current templates have not been tested in the graphical VS Code UI.
 
@@ -305,11 +328,51 @@ Copied templates passed headless adapter tests with GDB 16.3 and Microsoft C/C++
 
 Choose a profile that matches your firmware:
 
-- **CHERIoT:** profiles/cheriot1.toml uses tagged memory and a 16550 UART register layout with polled input.
-- **RV32E:** profiles/rv32e.toml provides 16 integer registers and the simple UART layout with input interrupts.
-- **RV32IMC:** profiles/rv32imc.toml provides 32 integer registers, multiplication and compressed instructions, and the simple UART layout with input interrupts.
+- *CHERIoT:* profiles/cheriot.toml uses tagged memory and a 16550 UART register layout with polled input.
+- *RV32E:* profiles/rv32e.toml provides 16 integer registers and the simple UART layout with input interrupts.
+- *RV32IMC:* profiles/rv32imc.toml provides 32 integer registers, multiplication and compressed instructions, and the simple UART layout with input interrupts.
 
 All three place RAM at 0x80000000 and share the other peripheral addresses. CHERIoT uses tagged RAM; the RV32 profiles use untagged RAM. The processor, memory map and device register layouts must match your firmware. A custom profile can select any of the nine supported processors.
+
+The RV32 profiles use elapsed host time for the platform timer. The supplied CHERIoT profile uses per-step timing for existing Sail-board firmware. Both processor families support either timing mode; neither models a cycle-accurate CPU.
+
+### Elapsed Timing
+
+For CHERIoT firmware built with --board=cheriot-vm, copy profiles/cheriot.toml to elapsed.toml and replace its machine section with:
+
+```toml
+[machine]
+name = "my-machine"
+timing = "elapsed"
+steps_per_tick = 1
+timer_hz = 2000
+```
+
+Run the rebuilt suite with that profile:
+
+```sh
+./target/release/cheriot-vm \
+  --profile elapsed.toml \
+  --elf "$CHERIOT_RTOS/tests/build/cheriot/cheriot/release/test-suite"
+```
+
+Elapsed timing uses the host's monotonic clock, so adjustments to calendar time do not change the timer. At 2,000 increments per second, each increment represents 500 microseconds. Instructions run independently of it. Guest time pauses while the debugger has stopped execution, and host scheduling can delay interrupt delivery. Some RTOS tests include timed waits, so elapsed-time runs can pause between messages. The supported timer frequency range is 1 to 1,000,000,000 Hz. For the supplied RTOS board, timer_hz matches CPU_TIMER_HZ. Its separate tickrate_hz of 10 sets firmware scheduling policy: one scheduler tick is 100 milliseconds, or 200 timer increments. The VM does not generate a separate scheduler clock.
+
+### Per-Step Timing
+
+For repeatable instruction-based simulations, select timing = "per-step". The optional steps_per_tick setting controls how many attempted steps make one virtual clock increment; its default is 1. Each increment advances the timer and, unless inhibited or explicitly written, the simulated cycle counter. Instructions still retire individually. This simulation does not model elapsed host time.
+
+For Sail-board RTOS firmware, use profiles/cheriot.toml:
+
+```sh
+./target/release/cheriot-vm \
+  --profile profiles/cheriot.toml \
+  --elf test-suite
+```
+
+Replace test-suite with your ELF file. This compatibility profile uses per-step timing with 100 steps per tick. A timer tick after every instruction can expire an RTOS sleep before the worker thread gets to run. The original reported Sail-board test suite completes with this profile. It also gives the Sail firmware's cycle-based time helper the same virtual clock rate as its timer. The same profile can also run firmware built for the supplied cheriot-vm board.
+
+CHERIoT adds a simulated GPIO at 0x10003000 or Ethernet device at 0x20000000 if the profile does not specify one. RV32 uses only the devices listed in its profile. The old default_devices profile setting is no longer accepted.
 
 ## Host Connections
 
@@ -331,7 +394,7 @@ To read from your terminal, or from a pipe connected to stdin:
 
 ```sh
 ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml --elf firmware.elf \
+  --profile profiles/cheriot.toml --elf firmware.elf \
   --uart in=/dev/stdin
 ```
 
@@ -341,7 +404,7 @@ You can also pipe bytes into the guest:
 
 ```sh
 printf 'Hello\n' | ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml --elf firmware.elf \
+  --profile profiles/cheriot.toml --elf firmware.elf \
   --uart in=/dev/stdin
 ```
 
@@ -353,7 +416,7 @@ To select stdin and stdout explicitly:
 
 ```sh
 ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml --elf firmware.elf \
+  --profile profiles/cheriot.toml --elf firmware.elf \
   --uart in=/dev/stdin,out=/dev/stdout \
   --output raw
 ```
@@ -364,7 +427,7 @@ Paths can also name regular files. For example, read input.bin and capture this 
 
 ```sh
 ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml --elf firmware.elf \
+  --profile profiles/cheriot.toml --elf firmware.elf \
   --uart in=input.bin,out=uart.log
 ```
 
@@ -372,11 +435,11 @@ To capture output without enabling host input:
 
 ```sh
 ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml --elf firmware.elf \
+  --profile profiles/cheriot.toml --elf firmware.elf \
   --uart out=uart.log
 ```
 
-An output file is created or overwritten. Use different input and output files. A dedicated output path receives only the selected UART’s bytes, without labels or escaping. VM diagnostics and HTIF output keep their normal destinations, including when a UART is named tohost. Use /dev/null as the output path to discard that UART's output.
+An output file is *created or overwritten*. Use different input and output files. A dedicated output path receives only the selected UART’s bytes, without labels or escaping. VM diagnostics and HTIF output keep their normal destinations, including when a UART is named tohost. Use /dev/null as the output path to discard that UART's output.
 
 Output is buffered and flushed during execution at roughly 16 ms intervals and when execution stops. This is not a real-time guarantee. A stalled consumer or host device can delay or fail output; a guest step limit does not impose a host wall-clock deadline.
 
@@ -392,11 +455,11 @@ To connect both directions to a host serial port using 115,200 baud and 8N1:
 
 Optional host serial settings are:
 
-- **baud:** a supported standard Linux rate, such as 9600, 57600 or 115200. If omitted, the port's existing rate is retained.
-- **data-bits:** 5, 6, 7 or 8; defaults to 8 when host settings are requested.
-- **parity:** none, even or odd; defaults to none.
-- **stop-bits:** 1 or 2; defaults to 1. Five data bits with two stop bits is rejected because the host convention cannot represent two full stop bits for that combination.
-- **flow:** none, rtscts for hardware flow control, or xonxoff for software flow control; defaults to none.
+- *baud:* a supported standard Linux rate, such as 9600, 57600 or 115200. If omitted, the port's existing rate is retained.
+- *data-bits:* 5, 6, 7 or 8; defaults to 8 when host settings are requested.
+- *parity:* none, even or odd; defaults to none.
+- *stop-bits:* 1 or 2; defaults to 1. Five data bits with two stop bits is rejected because the host convention cannot represent two full stop bits for that combination.
+- *flow:* none, rtscts for hardware flow control, or xonxoff for software flow control; defaults to none.
 
 For example, to request even parity and hardware flow control:
 
@@ -429,7 +492,7 @@ During debugging, dedicated output paths must be a terminal, pipe or /dev/null; 
 
 ```sh
 ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml --elf firmware.elf \
+  --profile profiles/cheriot.toml --elf firmware.elf \
   --gdb port=3333,output=raw | tee guest.log
 ```
 
@@ -439,7 +502,7 @@ Connect only the resources your program needs. These settings can be used indivi
 
 ```sh
 ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml --elf firmware.elf \
+  --profile profiles/cheriot.toml --elf firmware.elf \
   --gpio path=/dev/gpiochip0,lines=17+27 \
   --i2c path=/dev/i2c-1 \
   --spi path=/dev/spidev0.0 \
@@ -452,7 +515,7 @@ SPI connects guest chip select 0 by default, uses eight-bit transfers and starts
 
 ```sh
 ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml --elf firmware.elf \
+  --profile profiles/cheriot.toml --elf firmware.elf \
   --spi device=spi0,path=/dev/spidev0.1,select=1,speed=1000000
 ```
 
@@ -462,7 +525,7 @@ I²C can restrict host access with an optional addresses list:
 
 ```sh
 ./target/release/cheriot-vm \
-  --profile profiles/cheriot1.toml --elf firmware.elf \
+  --profile profiles/cheriot.toml --elf firmware.elf \
   --i2c path=/dev/i2c-1,addresses=0x50+0x68
 ```
 

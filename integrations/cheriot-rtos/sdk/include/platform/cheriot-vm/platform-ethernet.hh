@@ -32,7 +32,8 @@ struct VirtualEthernetRegisters : private utils::NoCopyNoMove
 
 	/// Link availability; nonzero while the backend is up.
 	const uint32_t link;
-	/// TX completion, RX availability and TX error flags. TX flags are W1C.
+	/// TX completion, RX availability and shared transfer-error flags.
+	/// Completion and error flags are W1C.
 	uint32_t status;
 	/// Length of the frame being staged, excluding FCS.
 	uint32_t transmitLength;
@@ -54,7 +55,8 @@ struct VirtualEthernetRegisters : private utils::NoCopyNoMove
 	{
 		StatusTransmitComplete = 1 << 0,
 		StatusReceiveReady     = 1 << 1,
-		StatusTransmitError    = 1 << 2,
+		StatusTransferError    = 1 << 2,
+		StatusTransmitError    = StatusTransferError,
 	};
 };
 
@@ -184,10 +186,7 @@ class VirtualEthernet : private utils::NoCopyNoMove
 		{
 			return false;
 		}
-		constexpr uint32_t TransmitStatus =
-		  VirtualEthernetRegisters::StatusTransmitComplete |
-		  VirtualEthernetRegisters::StatusTransmitError;
-		registers->status         = TransmitStatus;
+		registers->status = VirtualEthernetRegisters::StatusTransmitComplete;
 		registers->transmitLength = length;
 		for (size_t i = 0; i < length; i += 4)
 		{
@@ -199,8 +198,8 @@ class VirtualEthernet : private utils::NoCopyNoMove
 			registers->transmitData = word;
 		}
 		registers->transmitSend = 1;
-		return (registers->status & TransmitStatus) ==
-		       VirtualEthernetRegisters::StatusTransmitComplete;
+		return (registers->status &
+		        VirtualEthernetRegisters::StatusTransmitComplete) != 0;
 	}
 
 	/**

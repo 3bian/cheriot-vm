@@ -10,8 +10,7 @@ const PROFILE: &str = include_str!("../../profiles/rv32imc.toml");
 fn cheriot_tagging_requires_eight_byte_memory_alignment_and_size() {
     for (base, size) in [(1, 8), (0, 7), (8, 9)] {
         assert!(
-            MemoryRegion::new("ram".into(), base, size, MemoryKind::Ram, Tagging::Cheriot1)
-                .is_err()
+            MemoryRegion::new("ram".into(), base, size, MemoryKind::Ram, Tagging::Cheriot).is_err()
         );
         assert!(
             MemoryRegion::new("ram".into(), base, size, MemoryKind::Ram, Tagging::None).is_ok()
@@ -23,7 +22,7 @@ fn cheriot_tagging_requires_eight_byte_memory_alignment_and_size() {
         0xffff_fff8,
         8,
         MemoryKind::Ram,
-        Tagging::Cheriot1,
+        Tagging::Cheriot,
     )
     .unwrap();
     assert_eq!(region.tag_at(u32::MAX), Some(false));
@@ -41,7 +40,7 @@ fn memory_defaults_to_no_tags_and_explicit_models_build() {
 
     for (name, expected) in [
         ("memory", Tagging::None),
-        ("cheriot1-memory", Tagging::Cheriot1),
+        ("cheriot-memory", Tagging::Cheriot),
     ] {
         let text = PROFILE.replace("[[memory]]", &format!("[[{name}]]"));
         let computer = MachineConfiguration::parse(&text)
@@ -51,7 +50,7 @@ fn memory_defaults_to_no_tags_and_explicit_models_build() {
         assert_eq!(computer.bus.memory()[0].tagging(), expected);
         assert_eq!(
             computer.bus.memory()[0].tag_at(0x8000_0000),
-            if expected == Tagging::Cheriot1 {
+            if expected == Tagging::Cheriot {
                 Some(false)
             } else {
                 None
@@ -68,8 +67,8 @@ fn unsupported_models_legacy_booleans_and_conflicting_settings_are_rejected() {
         "tagging = 'cheriot-v2'",
         "tagging = 'mte'",
         "tagging = true",
-        "tagging = 'cheriot1'\ntagging = 'none'",
-        "tagging = 'cheriot1'\ntagged = false",
+        "tagging = 'cheriot'\ntagging = 'none'",
+        "tagging = 'cheriot'\ntagged = false",
         "tagged = true",
         "tagged = false",
     ] {

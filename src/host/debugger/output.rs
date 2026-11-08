@@ -12,6 +12,8 @@ use nix::sys::socket::{send, MsgFlags};
 use nix::sys::stat::{fstat, major, minor, SFlag};
 use nix::unistd::{dup, isatty, write};
 
+use crate::output::debugger_escape;
+
 pub struct DebugOutput {
     descriptor: OwnedFd,
     socket: bool,
@@ -53,22 +55,17 @@ impl DebugOutput {
     pub fn enqueue(&mut self, bytes: &[u8], raw: bool) -> io::Result<()> {
         let length = bytes
             .iter()
-            .map(|byte| if raw || printable(*byte) { 1 } else { 4 })
+            .map(|byte| if raw { 1 } else { debugger_escape(*byte).1 })
             .sum::<usize>();
         if length > Self::CAPACITY - self.pending.len() {
             return Err(io::Error::other("debugger host output budget exhausted"));
         }
         for byte in bytes {
-            if raw || printable(*byte) {
+            if raw {
                 self.pending.push_back(*byte);
             } else {
-                let hex = b"0123456789abcdef";
-                self.pending.extend([
-                    b'\\',
-                    b'x',
-                    hex[usize::from(byte >> 4)],
-                    hex[usize::from(byte & 15)],
-                ]);
+                let (escaped, length) = debugger_escape(*byte);
+                self.pending.extend(escaped[..length].iter().copied());
             }
         }
         Ok(())
@@ -104,8 +101,4 @@ impl DebugOutput {
             Err(error) => Err(error.into()),
         }
     }
-}
-
-fn printable(byte: u8) -> bool {
-    matches!(byte, b'\n' | b'\t' | 0x20..=0x7e)
 }

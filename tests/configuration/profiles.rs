@@ -12,10 +12,10 @@ fn public_profiles_share_peripherals_with_explicit_serial_and_tag_differences() 
         .map(|entry| entry.unwrap().file_name())
         .collect();
     profiles.sort();
-    assert_eq!(profiles, ["cheriot1.toml", "rv32e.toml", "rv32imc.toml"]);
+    assert_eq!(profiles, ["cheriot.toml", "rv32e.toml", "rv32imc.toml"]);
     let configuration =
-        MachineConfiguration::parse(include_str!("../../profiles/cheriot1.toml")).unwrap();
-    assert_eq!(configuration.name, "cheriot1");
+        MachineConfiguration::parse(include_str!("../../profiles/cheriot.toml")).unwrap();
+    assert_eq!(configuration.name, "cheriot");
     let mut expected_routes: Vec<_> = configuration
         .devices
         .iter()
@@ -29,7 +29,7 @@ fn public_profiles_share_peripherals_with_explicit_serial_and_tag_differences() 
         })
         .collect();
     let system = configuration
-        .build_cheriot1_raw(0x8000_0000, &[0x85, 0])
+        .build_cheriot_raw(0x8000_0000, &[0x85, 0])
         .unwrap();
     assert_eq!(system.computer.bus.memory()[0].size(), 0x0400_0000);
     assert!(system.computer.bus.device::<Uart>("uart0").is_some());
@@ -120,9 +120,9 @@ fn public_profiles_share_peripherals_with_explicit_serial_and_tag_differences() 
 
 #[test]
 fn cheriot_profile_accepts_16550_uart_setup_without_emitting_divisor_bytes() {
-    let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot1.toml"))
+    let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot.toml"))
         .unwrap()
-        .build_cheriot1_raw(0x8000_0000, &[0x85, 0])
+        .build_cheriot_raw(0x8000_0000, &[0x85, 0])
         .unwrap();
     let bus = &mut system.computer.bus;
     bus.write(0x1000_0004, 4, 0).unwrap();
@@ -146,13 +146,13 @@ fn all_public_profiles_build_at_their_declared_entry() {
         include_str!("../../profiles/rv32imc.toml"),
     ] {
         let configuration = MachineConfiguration::parse(profile).unwrap();
-        assert!(!configuration.is_cheriot1());
+        assert!(!configuration.is_cheriot());
         configuration.build(0x8000_0000).unwrap();
     }
     let configuration =
-        MachineConfiguration::parse(include_str!("../../profiles/cheriot1.toml")).unwrap();
-    assert!(configuration.is_cheriot1());
+        MachineConfiguration::parse(include_str!("../../profiles/cheriot.toml")).unwrap();
+    assert!(configuration.is_cheriot());
     configuration
-        .build_cheriot1_raw(0x8000_0000, &[0x85, 0])
+        .build_cheriot_raw(0x8000_0000, &[0x85, 0])
         .unwrap();
 }

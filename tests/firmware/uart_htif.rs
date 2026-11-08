@@ -23,5 +23,5 @@ pub fn program(cheriot: bool, output: u8, complete: bool) -> Vec<u8> {
         words.extend([0x0010_0193, 0x0030_a023, 0x0000_a223]);
     }
     words.push(0x0010_0073);
-    words.into_iter().flat_map(u32::to_le_bytes).collect()
+    crate::firmware_words::firmware_from_words(&words)
 }

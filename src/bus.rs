@@ -3,7 +3,7 @@
 
 use std::cell::OnceCell;
 
-use crate::cheriot1::Capability;
+use crate::cheriot::Capability;
 use crate::devices::{Device, InterruptLine};
 use crate::error::EmulatorError;
 use crate::memory::MemoryRegion;
@@ -92,12 +92,6 @@ impl Bus {
         self.memory.push(region);
 
         Ok(())
-    }
-
-    pub fn advance_time_without_dispatch(&mut self, ticks: u64) {
-        for mapping in &mut self.devices {
-            mapping.device.advance_time_without_dispatch(ticks);
-        }
     }
 
     pub fn check_host_errors(&self) -> Result<(), EmulatorError> {
@@ -213,6 +207,12 @@ impl Bus {
 
     pub fn memory(&self) -> &[MemoryRegion] {
         &self.memory
+    }
+
+    pub fn poll_host_inputs(&mut self) {
+        for mapping in &mut self.devices {
+            mapping.device.poll_host_inputs();
+        }
     }
 
     pub fn read(&mut self, address: u32, width: usize) -> Result<u32, EmulatorError> {
@@ -353,13 +353,6 @@ impl Bus {
         for mapping in &mut self.devices {
             mapping.device.tick(ticks);
         }
-    }
-
-    pub fn ticks_until_interrupt(&self) -> Option<u64> {
-        self.devices
-            .iter()
-            .filter_map(|mapping| mapping.device.ticks_until_interrupt())
-            .min()
     }
 
     pub fn write(&mut self, address: u32, width: usize, value: u32) -> Result<(), EmulatorError> {

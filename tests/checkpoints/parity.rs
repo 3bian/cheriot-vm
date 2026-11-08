@@ -6,17 +6,17 @@ use std::io::{self, Write};
 use std::rc::Rc;
 
 use cheriot_vm::bus::Bus;
-use cheriot_vm::cheriot1::{Capability, Cheriot1System};
+use cheriot_vm::cheriot::{Capability, CheriotSystem};
 use cheriot_vm::devices::uart::Uart;
 use cheriot_vm::devices::Device;
 use cheriot_vm::memory::{MemoryKind, MemoryRegion, Tagging};
 use cheriot_vm::processor::ProcessorProfile;
 use cheriot_vm::rv32::Processor;
-use cheriot_vm::{Computer, EmulatorError, MachineConfiguration};
+use cheriot_vm::{Computer, EmulatorError, MachineConfiguration, TimingPolicy};
 
 const ENTRY: u32 = 0x8000_0000;
 const PROFILES: [&str; 9] = [
-    "rv32e", "rv32em", "rv32ec", "rv32emc", "rv32i", "rv32im", "rv32ic", "rv32imc", "cheriot1",
+    "rv32e", "rv32em", "rv32ec", "rv32emc", "rv32i", "rv32im", "rv32ic", "rv32imc", "cheriot",
 ];
 
 struct FailingWriter;
@@ -60,27 +60,29 @@ impl Device for ObservedDevice {
 #[test]
 fn all_profiles_and_timing_policies_record_real_registers_counters_and_layout() {
     for (profile_id, name) in PROFILES.iter().enumerate() {
-        for (timing_id, timing) in ["per-step", "cheriot1-compatible"].iter().enumerate() {
-            let memory = if *name == "cheriot1" {
-                "cheriot1-memory"
+        for (timing_id, timing) in [(0, TimingPolicy::PerStep), (2, TimingPolicy::Elapsed)] {
+            let memory = if *name == "cheriot" {
+                "cheriot-memory"
             } else {
                 "memory"
             };
             let mut text = format!(
-                "[machine]\nname='snapshot'\ntiming='{timing}'\n\
+                "[machine]\nname='snapshot'\n\
                  [processor]\ntype='{name}'\n\
                  [[{memory}]]\nname='ram0'\ntype='ram'\nbase={ENTRY}\nsize=128\n"
             );
-            if *name == "cheriot1" {
+            if *name == "cheriot" {
                 text.push_str(
-                    "[[cheriot1-memory]]\nname='bitmap'\ntype='ram'\nbase=0x83000000\nsize=0x100000\n",
+                    "[[cheriot-memory]]\nname='bitmap'\ntype='ram'\nbase=0x83000000\nsize=0x100000\n",
                 );
             }
-            let configuration = MachineConfiguration::parse(&text).unwrap();
+            let mut configuration = MachineConfiguration::parse(&text).unwrap();
+            configuration.timing = timing;
+            configuration.steps_per_tick = 1;
             let mut bytes = Vec::new();
-            if *name == "cheriot1" {
+            if *name == "cheriot" {
                 let mut system = configuration
-                    .build_cheriot1_raw(ENTRY, &0x0010_8093_u32.to_le_bytes())
+                    .build_cheriot_raw(ENTRY, &0x0010_8093_u32.to_le_bytes())
                     .unwrap();
                 system
                     .computer
@@ -89,7 +91,7 @@ fn all_profiles_and_timing_policies_record_real_registers_counters_and_layout() 
                     .unwrap();
                 system.step().unwrap();
                 system.write_checkpoint(&mut bytes).unwrap();
-                let register_start = 25 + 17 * 8 + 5 * 8;
+                let register_start = 37 + 17 * 8 + 5 * 8;
                 assert_eq!(word(&bytes, register_start + 16), 42);
                 assert_eq!(word(&bytes, register_start + 24), 0);
                 assert_eq!(bytes[13], 16);
@@ -102,11 +104,11 @@ fn all_profiles_and_timing_policies_record_real_registers_counters_and_layout() 
                 computer.processor.write_register(1, 41).unwrap();
                 computer.step().unwrap();
                 computer.write_checkpoint(&mut bytes).unwrap();
-                assert_eq!(word(&bytes, 25 + 17 * 8 + 8), 42);
+                assert_eq!(word(&bytes, 37 + 17 * 8 + 8), 42);
                 assert_eq!(bytes[13], 8);
             }
-            assert_eq!(&bytes[..8], b"CHKP0002");
-            assert_eq!(bytes[8], u8::from(*name == "cheriot1"));
+            assert_eq!(&bytes[..8], b"CHKP0004");
+            assert_eq!(bytes[8], u8::from(*name == "cheriot"));
             assert_eq!(bytes[9], profile_id as u8);
             assert_eq!(bytes[11], timing_id as u8);
             assert_eq!(
@@ -114,12 +116,13 @@ fn all_profiles_and_timing_policies_record_real_registers_counters_and_layout() 
                 if (4..8).contains(&profile_id) { 32 } else { 16 }
             );
             assert_eq!(&bytes[16..20], &31_u32.to_le_bytes());
-            assert_eq!(word(&bytes, 25), 1);
-            assert_eq!(word(&bytes, 33), 1);
-            assert_eq!(word(&bytes, 41), u64::from(ENTRY + 4));
-            assert_eq!(word(&bytes, 49), u64::from(timing_id == 0));
-            assert_eq!(word(&bytes, 57), u64::from(timing_id == 0));
-            assert_eq!(word(&bytes, 65), 1);
+            assert_eq!(&bytes[20..24], &2_000_u32.to_le_bytes());
+            assert_eq!(word(&bytes, 37), 1);
+            assert_eq!(word(&bytes, 45), 1);
+            assert_eq!(word(&bytes, 53), u64::from(ENTRY + 4));
+            assert_eq!(word(&bytes, 61), 1);
+            assert_eq!(word(&bytes, 69), u64::from(timing_id == 0));
+            assert_eq!(word(&bytes, 77), 1);
         }
     }
 }
@@ -128,11 +131,12 @@ fn all_profiles_and_timing_policies_record_real_registers_counters_and_layout() 
 fn capability_snapshot_preserves_payload_tags_and_legacy_trace_bytes() {
     let mut bus = Bus::new();
     bus.add_memory(
-        MemoryRegion::new("ram".into(), ENTRY, 128, MemoryKind::Ram, Tagging::Cheriot1).unwrap(),
+        MemoryRegion::new("ram".into(), ENTRY, 128, MemoryKind::Ram, Tagging::Cheriot).unwrap(),
     )
     .unwrap();
     let mut system =
-        Cheriot1System::from_raw_on_bus(bus, ENTRY, &0x0000_0013_u32.to_le_bytes()).unwrap();
+        CheriotSystem::from_raw_on_bus(bus, ENTRY, &0x0000_0013_u32.to_le_bytes()).unwrap();
+    system.computer.timing = TimingPolicy::PerStep;
     let payload = 0x7e3e_0000_8000_0040;
     system
         .computer
@@ -145,17 +149,37 @@ fn capability_snapshot_preserves_payload_tags_and_legacy_trace_bytes() {
     system.write_checkpoint(&mut snapshot).unwrap();
     system.write_checkpoint_v1(&mut legacy).unwrap();
     system.write_state(&mut state).unwrap();
-    assert_eq!(word(&snapshot, 25 + 17 * 8 + 5 * 8 + 15 * 16), payload);
-    assert_eq!(word(&snapshot, 25 + 17 * 8 + 5 * 8 + 15 * 16 + 8), 1);
+    assert_eq!(word(&snapshot, 37 + 17 * 8 + 5 * 8 + 15 * 16), payload);
+    assert_eq!(word(&snapshot, 37 + 17 * 8 + 5 * 8 + 15 * 16 + 8), 1);
     assert_eq!(&legacy[..8], b"CHKP0001");
     assert_eq!(&legacy[8..8 + state.len()], state);
+}
+
+#[test]
+fn legacy_checkpoint_rejects_unrepresentable_frequency() {
+    let mut bus = Bus::new();
+    bus.add_memory(
+        MemoryRegion::new("ram".into(), ENTRY, 128, MemoryKind::Ram, Tagging::Cheriot).unwrap(),
+    )
+    .unwrap();
+    let mut system =
+        CheriotSystem::from_raw_on_bus(bus, ENTRY, &0x0000_0013_u32.to_le_bytes()).unwrap();
+    system.computer.timing = TimingPolicy::PerStep;
+    system.computer.set_timer_hz(12_345).unwrap();
+    let mut legacy = Vec::new();
+    assert!(system.write_checkpoint_v1(&mut legacy).is_err());
+    assert!(legacy.is_empty());
+    let mut current = Vec::new();
+    system.write_checkpoint(&mut current).unwrap();
+    assert_eq!(&current[..8], b"CHKP0004");
+    assert_eq!(&current[20..24], &12_345_u32.to_le_bytes());
 }
 
 #[test]
 fn integer_snapshot_records_explicit_tag_storage_without_capability_registers() {
     let mut bus = Bus::new();
     bus.add_memory(
-        MemoryRegion::new("ram".into(), ENTRY, 8, MemoryKind::Ram, Tagging::Cheriot1).unwrap(),
+        MemoryRegion::new("ram".into(), ENTRY, 8, MemoryKind::Ram, Tagging::Cheriot).unwrap(),
     )
     .unwrap();
     let computer = Computer::new(
@@ -174,7 +198,7 @@ fn integer_snapshot_records_explicit_tag_storage_without_capability_registers() 
     computer.write_checkpoint(&mut snapshot).unwrap();
     assert_eq!(&snapshot[8..11], &[0, 0, 1]);
     assert_eq!(snapshot[13], 8);
-    let mapping = 25 + 17 * 8 + 16 * 8 + 8;
+    let mapping = 37 + 17 * 8 + 16 * 8 + 8;
     assert_eq!(snapshot[mapping + 4 + 3 + 14], 1);
     assert_eq!(snapshot.last(), Some(&0));
 }
@@ -225,4 +249,36 @@ fn snapshot_observation_does_not_poll_devices_consume_input_or_swallow_write_err
 
 fn word(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
+}
+
+#[test]
+fn deterministic_quantum_and_fraction_are_part_of_both_snapshot_layouts() {
+    for profile in ["rv32e", "rv32imc", "cheriot"] {
+        let text = include_str!("../../profiles/cheriot.toml")
+            .replace("type = \"cheriot\"", &format!("type = \"{profile}\""));
+        let configuration = MachineConfiguration::parse(&text).unwrap();
+        let mut bytes = Vec::new();
+        if configuration.is_cheriot() {
+            let mut system = configuration
+                .build_cheriot_raw(ENTRY, &0x00000013_u32.to_le_bytes())
+                .unwrap();
+            system.step().unwrap();
+            system.write_checkpoint(&mut bytes).unwrap();
+            let mut legacy = Vec::new();
+            assert!(system.write_checkpoint_v1(&mut legacy).is_err());
+            assert!(legacy.is_empty());
+        } else {
+            let mut computer = configuration
+                .build_raw(ENTRY, &0x00000013_u32.to_le_bytes())
+                .unwrap();
+            computer.step().unwrap();
+            computer.write_checkpoint(&mut bytes).unwrap();
+        }
+        assert_eq!(&bytes[..8], b"CHKP0004");
+        assert_eq!(&bytes[24..28], &100_u32.to_le_bytes());
+        assert_eq!(&bytes[28..32], &1_u32.to_le_bytes());
+        assert_eq!(word(&bytes, 37), 1);
+        assert_eq!(word(&bytes, 61), 0);
+        assert_eq!(word(&bytes, 69), 0);
+    }
 }

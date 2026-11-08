@@ -34,7 +34,7 @@ impl<W: Write> GuestOutput<W> {
         if !self.uart_outputs.is_empty() {
             self.flush()?;
         }
-        if presentation == OutputPresentation::Raw {
+        if presentation.diagnostics_to_stderr() {
             self.flush()?;
             io::stderr().lock().write_all(text.as_bytes())
         } else {

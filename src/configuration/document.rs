@@ -13,8 +13,8 @@ use crate::memory::Tagging;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Document {
-    #[serde(default, rename = "cheriot1-memory")]
-    cheriot1_memory: Vec<Spanned<MemoryConfiguration>>,
+    #[serde(default, rename = "cheriot-memory")]
+    cheriot_memory: Vec<Spanned<MemoryConfiguration>>,
     #[serde(default)]
     ethernet: Vec<Spanned<ParsedDeviceConfiguration>>,
     #[serde(default)]
@@ -72,8 +72,8 @@ impl Document {
 
         for (tagging, regions) in [
             (Tagging::None, &mut self.memory),
-            (Tagging::Cheriot1, &mut self.cheriot1_memory),
-            (Tagging::Cheriot1, &mut self.tagged_memory),
+            (Tagging::Cheriot, &mut self.cheriot_memory),
+            (Tagging::Cheriot, &mut self.tagged_memory),
         ] {
             for region in regions.drain(..) {
                 let position = region.span().start;

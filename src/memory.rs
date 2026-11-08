@@ -1,10 +1,10 @@
 // Copyright 3bian Limited and Contributors
 // SPDX-License-Identifier: MIT
 
-use crate::cheriot1::Capability;
+use crate::cheriot::Capability;
 use crate::error::EmulatorError;
 
-mod cheriot1_tags;
+mod cheriot_tags;
 mod memory_kind;
 mod tag_bitmap;
 #[cfg(test)]
@@ -15,7 +15,7 @@ mod tagging;
 pub use memory_kind::MemoryKind;
 pub use tagging::Tagging;
 
-use cheriot1_tags::Cheriot1Tags;
+use cheriot_tags::CheriotTags;
 
 pub struct MemoryRegion {
     pub base: u32,
@@ -23,7 +23,7 @@ pub struct MemoryRegion {
     pub executable: bool,
     pub kind: MemoryKind,
     pub name: String,
-    tags: Option<Cheriot1Tags>,
+    tags: Option<CheriotTags>,
 }
 
 impl MemoryRegion {
@@ -55,7 +55,7 @@ impl MemoryRegion {
         }
 
         let tags = match tagging {
-            Tagging::Cheriot1 => Some(Cheriot1Tags::new(size)),
+            Tagging::Cheriot => Some(CheriotTags::new(size)),
             Tagging::None => None,
         };
         Ok(Self {
@@ -139,12 +139,12 @@ impl MemoryRegion {
     }
 
     pub fn tag_storage_bytes(&self) -> usize {
-        self.tags.as_ref().map_or(0, Cheriot1Tags::storage_bytes)
+        self.tags.as_ref().map_or(0, CheriotTags::storage_bytes)
     }
 
     pub fn tagging(&self) -> Tagging {
         match self.tags {
-            Some(_) => Tagging::Cheriot1,
+            Some(_) => Tagging::Cheriot,
             None => Tagging::None,
         }
     }

@@ -2,23 +2,23 @@
 // SPDX-License-Identifier: MIT
 
 use cheriot_vm::bus::Bus;
-use cheriot_vm::cheriot1::{Capability, Cheriot1System};
+use cheriot_vm::cheriot::{Capability, CheriotSystem};
 use cheriot_vm::completion::{CompletionPolicy, HostInterface};
 use cheriot_vm::configuration::DefaultDevices;
 use cheriot_vm::execution::TrapPolicy;
 use cheriot_vm::execution::{ExecutionReport, StopReason};
 use cheriot_vm::memory::{MemoryKind, MemoryRegion, Tagging};
-use cheriot_vm::{Computer, MachineConfiguration};
+use cheriot_vm::{Computer, MachineConfiguration, TimingPolicy};
 
 const BASE: u32 = 0x8000_0000;
 const TOHOST: u32 = BASE + 0x1000;
 const PROFILES: [&str; 9] = [
-    "rv32e", "rv32em", "rv32ec", "rv32emc", "rv32i", "rv32im", "rv32ic", "rv32imc", "cheriot1",
+    "rv32e", "rv32em", "rv32ec", "rv32emc", "rv32i", "rv32im", "rv32ic", "rv32imc", "cheriot",
 ];
-const TIMINGS: [&str; 2] = ["per-step", "cheriot1-compatible"];
+const TIMINGS: [TimingPolicy; 2] = [TimingPolicy::PerStep, TimingPolicy::Elapsed];
 
 enum Engine {
-    Cheriot(Box<Cheriot1System>),
+    Cheriot(Box<CheriotSystem>),
     Integer(Box<Computer>),
 }
 
@@ -74,7 +74,7 @@ impl Engine {
                 (
                     matches!(
                         report.outcome,
-                        cheriot_vm::cheriot1::StepOutcome::Trapped { .. }
+                        cheriot_vm::cheriot::StepOutcome::Trapped { .. }
                     ),
                     report.completion,
                 )
@@ -93,8 +93,8 @@ impl Engine {
     }
 }
 
-fn machine(profile: &str, timing: &str, words: &[u32], completion: bool) -> Engine {
-    let memory = if profile == "cheriot1" {
+fn machine(profile: &str, timing: TimingPolicy, words: &[u32], completion: bool) -> Engine {
+    let memory = if profile == "cheriot" {
         "tagged-memory"
     } else {
         "memory"
@@ -103,8 +103,6 @@ fn machine(profile: &str, timing: &str, words: &[u32], completion: bool) -> Engi
         r#"
 [machine]
 name = "matrix"
-timing = "{timing}"
-default_devices = "configured"
 [processor]
 type = "{profile}"
 [[{memory}]]
@@ -131,15 +129,18 @@ base = 0x10000000
 "#
     );
     let mut configuration = MachineConfiguration::parse(&text).unwrap();
+    configuration.timing = timing;
+    configuration.steps_per_tick = 1;
+    configuration.default_devices = DefaultDevices::Configured;
     configuration.completion = Some(if completion {
         CompletionPolicy::Address(TOHOST)
     } else {
         CompletionPolicy::Disabled
     });
-    let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_le_bytes()).collect();
-    if profile == "cheriot1" {
+    let bytes: Vec<u8> = crate::firmware_words::firmware_from_words(words);
+    if profile == "cheriot" {
         Engine::Cheriot(Box::new(
-            configuration.build_cheriot1_raw(BASE, &bytes).unwrap(),
+            configuration.build_cheriot_raw(BASE, &bytes).unwrap(),
         ))
     } else {
         let mut computer = configuration.build_raw(BASE, &bytes).unwrap();
@@ -154,9 +155,9 @@ fn all_profiles_and_timing_policies_count_attempts_fetches_retirements_and_ticks
         for timing in TIMINGS {
             let mut machine = machine(profile, timing, &[0x0010_8093; 100], false);
             for _ in 0..100 {
-                assert_eq!(machine.step(), (false, None), "{profile}/{timing}");
+                assert_eq!(machine.step(), (false, None), "{profile}/{timing:?}");
             }
-            assert_eq!(machine.read(1), 100, "{profile}/{timing}");
+            assert_eq!(machine.read(1), 100, "{profile}/{timing:?}");
             let report = machine.report();
             assert_eq!(
                 (
@@ -166,9 +167,12 @@ fn all_profiles_and_timing_policies_count_attempts_fetches_retirements_and_ticks
                 ),
                 (100, 100, 100)
             );
+            if timing == TimingPolicy::PerStep {
+                assert_eq!(report.virtual_time, 100);
+            }
             assert_eq!(
-                report.virtual_time,
-                if timing == "per-step" { 100 } else { 1 }
+                machine.bus().read(0x0200_bff8, 4).unwrap(),
+                report.virtual_time as u32
             );
             assert_eq!(machine.bus().devices().len(), 2);
         }
@@ -187,12 +191,16 @@ fn all_profiles_and_timing_policies_observe_only_successful_split_completion_sto
             );
             machine.set_register(1, TOHOST, true);
             machine.set_register(2, 1, false);
-            assert_eq!(machine.step(), (false, None), "{profile}/{timing} low");
-            assert_eq!(machine.step(), (false, Some(0)), "{profile}/{timing} high");
+            assert_eq!(machine.step(), (false, None), "{profile}/{timing:?} low");
+            assert_eq!(
+                machine.step(),
+                (false, Some(0)),
+                "{profile}/{timing:?} high"
+            );
             assert_eq!(
                 machine.step(),
                 (false, None),
-                "{profile}/{timing} repeated completion"
+                "{profile}/{timing:?} repeated completion"
             );
             let report = machine.report();
             assert_eq!(
@@ -228,7 +236,7 @@ fn all_profiles_and_timing_policies_leave_faulting_completion_stores_unobserved(
                     .unwrap(),
                 )
                 .unwrap();
-            assert_eq!(machine.step(), (true, None), "{profile}/{timing}");
+            assert_eq!(machine.step(), (true, None), "{profile}/{timing:?}");
             assert_eq!(machine.bus().inspect(TOHOST, 4).unwrap(), 0);
             assert_eq!(machine.report().retired_instructions, 0);
             match &machine {
@@ -251,7 +259,7 @@ fn all_profiles_and_timing_policies_deliver_interrupts_before_fetch() {
             };
             registers.machine_status |= 1 << 3;
             registers.interrupt_enable = 1 << 3;
-            assert_eq!(machine.step(), (true, None), "{profile}/{timing}");
+            assert_eq!(machine.step(), (true, None), "{profile}/{timing:?}");
             let report = machine.report();
             assert_eq!(
                 (
@@ -262,7 +270,9 @@ fn all_profiles_and_timing_policies_deliver_interrupts_before_fetch() {
                 (1, 0, 0)
             );
             assert_eq!(machine.read(1), 0);
-            assert_eq!(report.virtual_time, u64::from(timing == "per-step"));
+            if timing == TimingPolicy::PerStep {
+                assert_eq!(report.virtual_time, 1);
+            }
         }
     }
 }
@@ -307,12 +317,12 @@ fn explicit_generic_cheriot_elf_loading_does_not_require_symbols_or_default_devi
             BASE,
             64 * 1024 * 1024,
             MemoryKind::Ram,
-            Tagging::Cheriot1,
+            Tagging::Cheriot,
         )
         .unwrap(),
     )
     .unwrap();
-    let system = Cheriot1System::from_elf_with_policy(
+    let system = CheriotSystem::from_elf_with_policy(
         bus,
         &bytes,
         DefaultDevices::Configured,
@@ -356,7 +366,7 @@ fn integer_tag_storage_is_explicit_and_does_not_enable_capability_instructions()
         .unwrap()
         .build_raw(0, &0x0000_005b_u32.to_le_bytes())
         .unwrap();
-    assert_eq!(computer.bus.memory()[0].tagging(), Tagging::Cheriot1);
+    assert_eq!(computer.bus.memory()[0].tagging(), Tagging::Cheriot);
     assert!(matches!(
         computer.step().unwrap(),
         cheriot_vm::rv32::StepOutcome::Trapped { cause: 2, .. }
@@ -395,11 +405,14 @@ fn all_profiles_and_timing_policies_preserve_wfi_policy_semantics() {
             let mut machine = machine(profile, timing, &[0x1050_0073], false);
             machine.bus().write(0x0200_4000, 4, 5).unwrap();
             machine.bus().write(0x0200_4004, 4, 0).unwrap();
-            assert_eq!(machine.step(), (false, None), "{profile}/{timing}");
+            assert_eq!(machine.step(), (false, None), "{profile}/{timing:?}");
             let report = machine.report();
+            if timing == TimingPolicy::PerStep {
+                assert_eq!(report.virtual_time, 1);
+            }
             assert_eq!(
-                report.virtual_time,
-                if timing == "per-step" { 1 } else { 5 }
+                machine.bus().read(0x0200_bff8, 4).unwrap(),
+                report.virtual_time as u32
             );
             assert_eq!(
                 (
@@ -424,7 +437,7 @@ fn all_profiles_and_timing_policies_enforce_register_and_extension_limits() {
         ("rv32im", false, true, false),
         ("rv32ic", false, false, true),
         ("rv32imc", false, true, true),
-        ("cheriot1", true, true, true),
+        ("cheriot", true, true, true),
     ] {
         for timing in TIMINGS {
             for (word, must_trap) in [
@@ -438,7 +451,7 @@ fn all_profiles_and_timing_policies_enforce_register_and_extension_limits() {
                 assert_eq!(
                     machine.step(),
                     (must_trap, None),
-                    "{profile}/{timing}/{word:#x}"
+                    "{profile}/{timing:?}/{word:#x}"
                 );
                 assert_eq!(machine.report().fetched_instructions, 1);
                 assert_eq!(machine.report().retired_instructions, u64::from(!must_trap));
@@ -454,7 +467,7 @@ fn all_profiles_and_timing_policies_enforce_register_and_extension_limits() {
             assert_eq!(
                 machine.step(),
                 (!compressed, None),
-                "{profile}/{timing}/alignment"
+                "{profile}/{timing:?}/alignment"
             );
             assert_eq!(machine.report().fetched_instructions, u64::from(compressed));
         }
@@ -481,7 +494,7 @@ fn completion_policy_is_explicit_and_validated_for_both_firmware_forms() {
 }
 
 #[test]
-fn all_profiles_and_timing_policies_distinguish_breakpoint_ebreak_and_budget_stops() {
+fn all_profiles_distinguish_breakpoint_ebreak_and_budget_stops() {
     use std::fs;
     use std::process::Command;
     let directory = std::env::temp_dir().join(format!("emu-runtime-stops-{}", std::process::id()));
@@ -489,67 +502,63 @@ fn all_profiles_and_timing_policies_distinguish_breakpoint_ebreak_and_budget_sto
     let firmware = directory.join("stop.bin");
     fs::write(
         &firmware,
-        [0x0000_0013_u32, 0x0010_0073]
-            .into_iter()
-            .flat_map(u32::to_le_bytes)
-            .collect::<Vec<_>>(),
+        crate::firmware_words::firmware_from_words(&[0x0000_0013_u32, 0x0010_0073]),
     )
     .unwrap();
     for profile in PROFILES {
-        for timing in TIMINGS {
-            let memory = if profile == "cheriot1" {
-                "tagged-memory"
-            } else {
-                "memory"
-            };
-            let text = format!("[machine]\nname='stop'\ntiming='{timing}'\ndefault_devices='configured'\ncompletion='disabled'\n[processor]\ntype='{profile}'\n[[{memory}]]\nname='ram'\ntype='ram'\nbase={BASE}\nsize=4096\n[[{memory}]]\nname='shadow'\ntype='ram'\nbase=0x83000000\nsize=0x100000\n");
-            let path = directory.join(format!("{profile}-{timing}.toml"));
-            fs::write(&path, text).unwrap();
-            for (extra, success, expected) in [
-                (
-                    vec!["--steps", "1", "--breakpoint", "0x80000004"],
-                    true,
-                    "Breakpoint at 0x80000004",
-                ),
-                (
-                    vec!["--steps", "2", "--trap-policy", "stop"],
-                    true,
-                    "Guest EBREAK at 0x80000004",
-                ),
-                (
-                    vec!["--steps", "1"],
-                    false,
-                    "step limit reached after 1 steps",
-                ),
-            ] {
-                let result = Command::new(env!("CARGO_BIN_EXE_cheriot-vm"))
-                    .args([
-                        "--profile",
-                        path.to_str().unwrap(),
-                        "--raw",
-                        firmware.to_str().unwrap(),
-                        "--address",
-                        "0x80000000",
-                        "--output",
-                        "raw",
-                    ])
-                    .args(extra)
-                    .output()
-                    .unwrap();
-                assert_eq!(
-                    result.status.success(),
-                    success,
-                    "{profile}/{timing}: {:?}",
-                    result
-                );
-                assert!(result.stdout.is_empty(), "raw stdout contains diagnostics");
-                let diagnostics = String::from_utf8(result.stderr).unwrap();
-                assert!(
-                    diagnostics.contains(expected),
-                    "{profile}/{timing}: {diagnostics}"
-                );
-                assert!(!diagnostics.contains("Guest exit status:"));
-            }
+        let timing = "elapsed";
+        let memory = if profile == "cheriot" {
+            "tagged-memory"
+        } else {
+            "memory"
+        };
+        let text = format!("[machine]\nname='stop'\ncompletion='disabled'\n[processor]\ntype='{profile}'\n[[{memory}]]\nname='ram'\ntype='ram'\nbase={BASE}\nsize=4096\n[[{memory}]]\nname='shadow'\ntype='ram'\nbase=0x83000000\nsize=0x100000\n");
+        let path = directory.join(format!("{profile}-{timing}.toml"));
+        fs::write(&path, text).unwrap();
+        for (extra, success, expected) in [
+            (
+                vec!["--steps", "1", "--breakpoint", "0x80000004"],
+                true,
+                "Breakpoint at 0x80000004",
+            ),
+            (
+                vec!["--steps", "2", "--trap-policy", "stop"],
+                true,
+                "Guest EBREAK at 0x80000004",
+            ),
+            (
+                vec!["--steps", "1"],
+                false,
+                "step limit reached after 1 steps",
+            ),
+        ] {
+            let result = Command::new(env!("CARGO_BIN_EXE_cheriot-vm"))
+                .args([
+                    "--profile",
+                    path.to_str().unwrap(),
+                    "--raw",
+                    firmware.to_str().unwrap(),
+                    "--address",
+                    "0x80000000",
+                    "--output",
+                    "raw",
+                ])
+                .args(extra)
+                .output()
+                .unwrap();
+            assert_eq!(
+                result.status.success(),
+                success,
+                "{profile}/{timing:?}: {:?}",
+                result
+            );
+            assert!(result.stdout.is_empty(), "raw stdout contains diagnostics");
+            let diagnostics = String::from_utf8(result.stderr).unwrap();
+            assert!(
+                diagnostics.contains(expected),
+                "{profile}/{timing:?}: {diagnostics}"
+            );
+            assert!(!diagnostics.contains("Guest exit status:"));
         }
     }
     fs::remove_dir_all(directory).unwrap();
@@ -558,13 +567,13 @@ fn all_profiles_and_timing_policies_distinguish_breakpoint_ebreak_and_budget_sto
 #[test]
 fn complete_capability_stores_do_not_lose_completion_after_fifteen_zero_requests() {
     for timing in TIMINGS {
-        let mut machine = machine("cheriot1", timing, &[0x0020_b023; 17], true);
+        let mut machine = machine("cheriot", timing, &[0x0020_b023; 17], true);
         machine.set_register(1, TOHOST, true);
         for _ in 0..15 {
             assert_eq!(machine.step(), (false, None));
         }
         machine.set_register(2, 1, false);
-        assert_eq!(machine.step(), (false, Some(0)), "{timing}");
+        assert_eq!(machine.step(), (false, Some(0)), "{timing:?}");
         assert_eq!(
             machine.step(),
             (false, None),
@@ -632,8 +641,8 @@ fn all_profiles_and_timing_policies_share_spi_and_i2c_host_transfers_and_precise
             engine.bus().write(0x10001008, 4, 0).unwrap();
             engine.set_register(1, 0x10001000, true);
             engine.set_register(2, 0x42, false);
-            assert!(!engine.step().0, "{profile} {timing}");
-            assert!(!engine.step().0, "{profile} {timing}");
+            assert!(!engine.step().0, "{profile} {timing:?}");
+            assert!(!engine.step().0, "{profile} {timing:?}");
             assert_eq!(engine.read(3), 0x5a);
             assert_eq!(*spi_calls.borrow(), [0x42]);
             engine.set_register(1, 0x10002010, true);
@@ -649,26 +658,26 @@ fn all_profiles_and_timing_policies_share_spi_and_i2c_host_transfers_and_precise
                     .unwrap();
             }
             engine.set_register(2, 1 << 16, false);
-            assert!(!engine.step().0, "{profile} {timing}");
+            assert!(!engine.step().0, "{profile} {timing:?}");
             engine.bus().write(0x10002000, 4, 0x50).unwrap();
             engine.bus().write(0x10002004, 4, 0x10).unwrap();
             engine.bus().write(0x10002008, 4, 1).unwrap();
             assert!(i2c_calls.borrow().is_empty());
             engine.set_register(1, 0x10002008, true);
             engine.set_register(2, 2, false);
-            assert!(!engine.step().0, "{profile} {timing}");
+            assert!(!engine.step().0, "{profile} {timing:?}");
             engine.set_register(1, 0x10002004, true);
-            assert!(!engine.step().0, "{profile} {timing}");
+            assert!(!engine.step().0, "{profile} {timing:?}");
             assert_eq!(engine.read(3), 0xab);
             assert_eq!(*i2c_calls.borrow(), [0x50]);
             engine.set_register(1, 0x10002008, true);
-            assert!(!engine.step().0, "{profile} {timing}");
+            assert!(!engine.step().0, "{profile} {timing:?}");
             engine.set_register(1, 0x10002004, true);
-            assert!(!engine.step().0, "{profile} {timing}");
+            assert!(!engine.step().0, "{profile} {timing:?}");
             assert_eq!(engine.read(3), 0xcd);
             assert_eq!(*i2c_calls.borrow(), [0x50]);
             engine.set_register(1, 0x10001001, false);
-            assert!(engine.step().0, "{profile} {timing}");
+            assert!(engine.step().0, "{profile} {timing:?}");
             assert_eq!(*spi_calls.borrow(), [0x42]);
             engine.bus().check_host_errors().unwrap();
         }

@@ -34,17 +34,7 @@ impl Registers {
     }
 
     pub fn register(&self, id: RegisterId, output: &mut [u8]) -> Option<usize> {
-        let bytes = &self.bytes[id.byte_range()];
-        if output.len() < bytes.len() {
-            return None;
-        }
-        if bytes.iter().any(Option::is_none) {
-            return Some(0);
-        }
-        for (destination, value) in output.iter_mut().zip(bytes) {
-            *destination = (*value)?;
-        }
-        Some(bytes.len())
+        crate::debugger::read_register(&self.bytes[id.byte_range()], output)
     }
 
     fn put(&mut self, offset: usize, value: u32) {

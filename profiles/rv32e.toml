@@ -3,8 +3,8 @@
 
 [machine]
 name = "rv32e"
-default_devices = "configured"
-timing = "per-step"
+timing = "elapsed"
+timer_hz = 2000
 
 [processor]
 type = "rv32e"

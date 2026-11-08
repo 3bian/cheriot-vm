@@ -70,23 +70,6 @@ impl Device for Timer32 {
         self.count = self.count.wrapping_add(ticks as u32);
     }
 
-    fn ticks_until_interrupt(&self) -> Option<u64> {
-        if self.control & 3 != 3 {
-            return None;
-        }
-
-        if self.pending {
-            return Some(0);
-        }
-
-        let distance = self.compare.wrapping_sub(self.count);
-        Some(if distance == 0 {
-            1_u64 << 32
-        } else {
-            u64::from(distance)
-        })
-    }
-
     fn write(&mut self, offset: u32, width: usize, value: u32) -> Result<(), EmulatorError> {
         register_width(offset, width, 16)?;
 

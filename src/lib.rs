@@ -5,7 +5,7 @@
 
 pub mod bus;
 pub mod checkpoint;
-pub mod cheriot1;
+pub mod cheriot;
 pub mod completion;
 pub mod configuration;
 #[cfg(feature = "gdb")]

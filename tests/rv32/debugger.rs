@@ -7,27 +7,55 @@ use gdbstub::arch::{Arch, RegId, Registers as GdbRegisters};
 use gdbstub::target::ext::base::singlethread::{SingleThreadResume, SingleThreadSingleStep};
 use gdbstub::target::ext::breakpoints::{HwBreakpoint, SwBreakpoint};
 
-use cheriot_vm::debugger::StopReason;
+use cheriot_vm::debugger::{BreakpointType, StopReason};
 use cheriot_vm::firmware::load_raw;
 use cheriot_vm::rv32::debugger::Architecture;
 use cheriot_vm::rv32::debugger::RegisterId;
 use cheriot_vm::rv32::debugger::Registers;
 use cheriot_vm::rv32::debugger::Target;
-use cheriot_vm::MachineConfiguration;
+use cheriot_vm::{MachineConfiguration, TimingPolicy};
 
 const PROFILES: [&str; 8] = [
     "rv32e", "rv32em", "rv32ec", "rv32emc", "rv32i", "rv32im", "rv32ic", "rv32imc",
 ];
 
-fn target(profile: &str, timing: &str, words: &[u32], limit: u64) -> Target {
-    let configuration = MachineConfiguration::parse(&format!(
-        "[machine]\nname='debugger-test'\ntiming='{timing}'\n[processor]\ntype='{profile}'\n\
+#[test]
+fn host_clock_pauses_during_debugger_stops() {
+    for profile in ["rv32e", "rv32imc"] {
+        let mut target = target(
+            profile,
+            TimingPolicy::Elapsed,
+            &[0x0000_0013, 0xffdf_f06f],
+            0,
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert_eq!(target.computer().processor.machine_registers.time, 0);
+        target.resume(None).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert_eq!(target.advance().unwrap(), None);
+        target.halt(StopReason::Interrupted);
+        let stopped = target.computer().processor.machine_registers.time;
+        assert!(stopped >= 40, "{profile}: {stopped}");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert_eq!(target.computer().processor.machine_registers.time, stopped);
+        target.step(None).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert_eq!(target.advance().unwrap(), Some(StopReason::Step));
+        assert!(target.computer().processor.machine_registers.time > stopped);
+    }
+}
+
+fn target(profile: &str, timing: TimingPolicy, words: &[u32], limit: u64) -> Target {
+    let mut configuration = MachineConfiguration::parse(&format!(
+        "[machine]\nname='debugger-test'\n[processor]\ntype='{profile}'\n\
          [processor.instruction_groups]\ncontrol_registers=true\n\
          [[memory]]\nname='ram'\ntype='ram'\nbase=0x80000000\nsize=256\n"
     ))
     .unwrap();
+    configuration.timing = timing;
+    configuration.steps_per_tick = 1;
     let mut computer = configuration.build(0x8000_0000).unwrap();
-    let bytes: Vec<_> = words.iter().copied().flat_map(u32::to_le_bytes).collect();
+    let bytes: Vec<_> = crate::firmware_words::firmware_from_words(words);
     load_raw(&mut computer.bus, 0x8000_0000, &bytes).unwrap();
     Target::new(computer, Some(limit))
 }
@@ -35,7 +63,7 @@ fn target(profile: &str, timing: &str, words: &[u32], limit: u64) -> Target {
 #[test]
 fn all_integer_profiles_share_breakpoint_budget_and_readonly_inspection() {
     for profile in PROFILES {
-        for timing in ["per-step", "cheriot1-compatible"] {
+        for timing in [TimingPolicy::PerStep, TimingPolicy::Elapsed] {
             let mut target = target(profile, timing, &[0x0010_8093, 0xffdf_f06f], 2);
             let mut before = [0; 8];
             target.inspect(0x8000_0000, &mut before).unwrap();
@@ -43,7 +71,10 @@ fn all_integer_profiles_share_breakpoint_budget_and_readonly_inspection() {
             target.resume(None).unwrap();
             assert_eq!(
                 target.advance().unwrap(),
-                Some(StopReason::Breakpoint(0x8000_0000))
+                Some(StopReason::Breakpoint(
+                    0x8000_0000,
+                    BreakpointType::Software
+                ))
             );
             assert_eq!(target.computer().attempted_steps, 0);
             target.step(None).unwrap();
@@ -53,7 +84,10 @@ fn all_integer_profiles_share_breakpoint_budget_and_readonly_inspection() {
             assert_eq!(target.advance().unwrap(), None);
             assert_eq!(
                 target.advance().unwrap(),
-                Some(StopReason::Breakpoint(0x8000_0000))
+                Some(StopReason::Breakpoint(
+                    0x8000_0000,
+                    BreakpointType::Software
+                ))
             );
             target.resume(None).unwrap();
             assert_eq!(target.advance().unwrap(), Some(StopReason::RunLimit));
@@ -76,15 +110,19 @@ fn all_integer_profiles_share_breakpoint_budget_and_readonly_inspection() {
 #[test]
 fn integer_register_packets_match_individual_reads_and_actual_architecture() {
     for profile in PROFILES {
-        let target = target(profile, "per-step", &[0x0010_8093], 10);
+        let target = target(profile, TimingPolicy::PerStep, &[0x0010_8093], 10);
         let registers = Registers::new(&target.computer().processor);
         let mut bytes = Vec::new();
         registers.gdb_serialize(|byte| bytes.push(byte));
         assert_eq!(bytes.len(), 236);
+        let (pc, _) = RegisterId::from_raw_id(32).unwrap();
+        let mut short = [0xa5; 3];
+        assert_eq!(registers.register(pc, &mut short), None);
+        assert_eq!(short, [0xa5; 3]);
         for number in 0..33 {
             let (id, size) = RegisterId::from_raw_id(number).unwrap();
             assert_eq!(id.to_raw_id(), Some(number));
-            let mut single = [0; 4];
+            let mut single = [0xa5; 4];
             let size = size.unwrap().get();
             let absent = profile.contains('e') && (16..32).contains(&number);
             assert_eq!(
@@ -93,6 +131,7 @@ fn integer_register_packets_match_individual_reads_and_actual_architecture() {
             );
             if absent {
                 assert_eq!(&bytes[number * 4..number * 4 + 4], &[None; 4]);
+                assert_eq!(single, [0xa5; 4]);
             } else {
                 assert_eq!(bytes[number * 4..number * 4 + 4], single.map(Some));
             }
@@ -116,8 +155,13 @@ fn integer_register_packets_match_individual_reads_and_actual_architecture() {
 #[test]
 fn integer_fault_record_preserves_transition_and_single_step_observes_traps() {
     for profile in PROFILES {
-        let mut computer =
-            target(profile, "per-step", &[0xffff_ffff, 0x0000_0013], 10).into_computer();
+        let mut computer = target(
+            profile,
+            TimingPolicy::PerStep,
+            &[0xffff_ffff, 0x0000_0013],
+            10,
+        )
+        .into_computer();
         computer.processor.machine_registers.trap_vector = 0x8000_0004;
         let mut target = Target::new(computer, Some(10));
         target.step(None).unwrap();
@@ -133,7 +177,7 @@ fn integer_fault_record_preserves_transition_and_single_step_observes_traps() {
 
 #[test]
 fn integer_ebreak_is_a_host_stop_without_guest_completion() {
-    let mut target = target("rv32i", "per-step", &[0x0010_0073], 1);
+    let mut target = target("rv32i", TimingPolicy::PerStep, &[0x0010_0073], 1);
     target.step(None).unwrap();
     assert_eq!(
         target.advance().unwrap(),
@@ -148,7 +192,7 @@ fn integer_ebreak_is_a_host_stop_without_guest_completion() {
 
 #[test]
 fn disabled_integer_csr_group_is_unavailable_in_bulk_and_single_reads() {
-    let mut computer = target("rv32e", "per-step", &[0x0000_0013], 1).into_computer();
+    let mut computer = target("rv32e", TimingPolicy::PerStep, &[0x0000_0013], 1).into_computer();
     computer.processor.profile.control_registers = false;
     let registers = Registers::new(&computer.processor);
     let mut bytes = Vec::new();
@@ -165,7 +209,7 @@ fn stop_policy_uses_architectural_exception_codes_and_preserves_fault_details() 
         (vec![0x0000_0073], 0x8000_0000, 11, 0),
         (vec![0x0000_0013], 0x8000_0100, 1, 0x8000_0100),
     ] {
-        let mut computer = target("rv32i", "per-step", &words, 4).into_computer();
+        let mut computer = target("rv32i", TimingPolicy::PerStep, &words, 4).into_computer();
         computer.trap_policy = cheriot_vm::execution::TrapPolicy::Stop;
         computer.processor.program_counter = pc;
         let mut target = Target::new(computer, Some(4));
@@ -188,7 +232,12 @@ fn stop_policy_uses_architectural_exception_codes_and_preserves_fault_details() 
 #[test]
 fn removing_one_breakpoint_type_preserves_the_other_and_duplicate_requests_are_idempotent() {
     for remove_software in [false, true] {
-        let mut target = target("rv32imc", "per-step", &[0x0010_8093, 0xffdf_f06f], 10);
+        let mut target = target(
+            "rv32imc",
+            TimingPolicy::PerStep,
+            &[0x0010_8093, 0xffdf_f06f],
+            10,
+        );
         let address = 0x8000_0000;
         for _ in 0..2 {
             assert!(matches!(target.add_sw_breakpoint(address, 4), Ok(true)));
@@ -207,7 +256,14 @@ fn removing_one_breakpoint_type_preserves_the_other_and_duplicate_requests_are_i
         target.resume(None).unwrap();
         assert_eq!(
             target.advance().unwrap(),
-            Some(StopReason::Breakpoint(address))
+            Some(StopReason::Breakpoint(
+                address,
+                if remove_software {
+                    BreakpointType::Hardware
+                } else {
+                    BreakpointType::Software
+                },
+            ))
         );
         let computer = target.computer();
         assert_eq!(computer.attempted_steps, 0);
@@ -219,7 +275,12 @@ fn removing_one_breakpoint_type_preserves_the_other_and_duplicate_requests_are_i
 #[test]
 fn retransmitted_breakpoint_insertions_need_only_one_removal() {
     for hardware in [false, true] {
-        let mut target = target("rv32imc", "per-step", &[0x0010_8093, 0xffdf_f06f], 10);
+        let mut target = target(
+            "rv32imc",
+            TimingPolicy::PerStep,
+            &[0x0010_8093, 0xffdf_f06f],
+            10,
+        );
         for _ in 0..2 {
             assert!(matches!(
                 if hardware {
@@ -244,4 +305,17 @@ fn retransmitted_breakpoint_insertions_need_only_one_removal() {
         assert_eq!(computer.attempted_steps, 1);
         assert_eq!(computer.processor.machine_registers.retired, 1);
     }
+}
+
+#[test]
+fn monitor_rejects_oversized_and_invalid_utf8_commands() {
+    let target = target("rv32imc", TimingPolicy::PerStep, &[0x0000_0013], 1);
+    assert_eq!(
+        target.monitor(&[b'a'; 129]).unwrap_err(),
+        "monitor command too long"
+    );
+    assert_eq!(
+        target.monitor(&[0xff]).unwrap_err(),
+        "monitor requires UTF-8"
+    );
 }

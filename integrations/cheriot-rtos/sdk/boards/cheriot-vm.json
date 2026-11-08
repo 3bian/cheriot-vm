@@ -4,6 +4,10 @@
             "start": 33554432,
             "length": 786432
         },
+        "clint_time": {
+            "start": 33603576,
+            "length": 8
+        },
         "plic": {
             "start": 201326592,
             "length": 16

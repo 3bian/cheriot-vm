@@ -32,7 +32,8 @@ pub struct Target {
 }
 
 impl Target {
-    pub fn new(computer: Computer, maximum_steps: Option<u64>) -> Self {
+    pub fn new(mut computer: Computer, maximum_steps: Option<u64>) -> Self {
+        computer.pause_host_clock();
         Self {
             control: RunControl::new(maximum_steps),
             fault: None,
@@ -81,12 +82,8 @@ impl Target {
                 value,
                 resulting_pc: self.computer.processor.program_counter,
             });
-            if cause & 0x8000_0000 == 0 {
-                return Ok(Some(self.halt(if cause == 3 {
-                    StopReason::Ebreak(address)
-                } else {
-                    StopReason::Fault(cause)
-                })));
+            if let Some(reason) = StopReason::from_fault(address, cause) {
+                return Ok(Some(self.halt(reason)));
             }
         }
         if let Some(code) = self.computer.completion {
@@ -99,13 +96,11 @@ impl Target {
     }
 
     pub fn drain_output(&mut self, bytes: &mut Vec<u8>) {
-        self.computer.bus.drain_output(bytes);
-        if let Some(interface) = &mut self.computer.host_interface {
-            interface.drain_transmitted(bytes);
-        }
+        self.computer.drain_output(bytes);
     }
 
     pub fn halt(&mut self, reason: StopReason) -> StopReason {
+        self.computer.pause_host_clock();
         self.state = RunState::Halted;
         self.reason = reason;
         reason
@@ -115,16 +110,13 @@ impl Target {
         inspect_memory(&self.computer.bus, address, data)
     }
 
-    pub fn into_computer(self) -> Computer {
+    pub fn into_computer(mut self) -> Computer {
+        self.computer.resume_host_clock();
         self.computer
     }
 
     pub fn monitor(&self, command: &[u8]) -> Result<String, &'static str> {
-        if command.len() > 128 {
-            return Err("monitor command too long");
-        }
-        let command = std::str::from_utf8(command).map_err(|_| "monitor requires UTF-8")?;
-        let words: Vec<_> = command.split_whitespace().collect();
+        let words = crate::debugger::monitor_words(command)?;
         match words.as_slice() {
             ["help"] => Ok("help | fault | status\nInteger registers and CSRs are read-only. Unimplemented E registers and disabled CSRs are unavailable.\n".into()),
             ["fault"] => Ok(match self.fault {
@@ -183,7 +175,9 @@ impl Target {
         signal: Option<Signal>,
     ) -> Result<(), EmulatorError> {
         self.control
-            .resume(&mut self.state, self.reason, state, signal)
+            .resume(&mut self.state, self.reason, state, signal)?;
+        self.computer.resume_host_clock();
+        Ok(())
     }
 }
 
@@ -291,12 +285,9 @@ impl MonitorCmd for Target {
     fn handle_monitor_cmd(
         &mut self,
         command: &[u8],
-        mut output: ConsoleOutput<'_>,
+        output: ConsoleOutput<'_>,
     ) -> Result<(), Self::Error> {
-        match self.monitor(command) {
-            Ok(text) => gdbstub::output!(output, "{}", text),
-            Err(error) => gdbstub::outputln!(output, "error: {}", error),
-        }
+        crate::debugger::present_monitor(self.monitor(command), output);
         Ok(())
     }
 }

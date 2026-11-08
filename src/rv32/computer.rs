@@ -10,7 +10,7 @@ use crate::instructions::{
     decode_compressed, decode_standard, CsrOperation, DecodedInstruction, Instruction,
 };
 use crate::rv32::Processor;
-use crate::timing_policy::TimingPolicy;
+use crate::timing_policy::{HostClock, StepClock, TimingPolicy};
 
 use super::StepOutcome;
 
@@ -24,8 +24,10 @@ pub struct Computer {
     pub completion: Option<u64>,
     pub fetched_instructions: u64,
     pub host_interface: Option<HostInterface>,
+    host_clock: HostClock,
     pub last_store: Option<(u32, usize)>,
     pub processor: Processor,
+    step_clock: StepClock,
     pub timing: TimingPolicy,
     pub trap_policy: TrapPolicy,
 }
@@ -36,11 +38,13 @@ impl Computer {
             attempted_steps: 0,
             completion: None,
             host_interface: None,
+            host_clock: HostClock::default(),
             last_store: None,
             processor,
             bus,
             fetched_instructions: 0,
-            timing: TimingPolicy::PerStep,
+            step_clock: StepClock::default(),
+            timing: TimingPolicy::default(),
             trap_policy: TrapPolicy::Vector,
         }
     }
@@ -62,6 +66,49 @@ impl Computer {
         }
     }
 
+    pub fn set_steps_per_tick(&mut self, steps: u32) -> Result<(), crate::EmulatorError> {
+        self.step_clock.set_period(self.timing, steps)
+    }
+
+    pub fn step_phase(&self) -> u32 {
+        self.step_clock.phase()
+    }
+
+    pub fn steps_per_tick(&self) -> u32 {
+        self.step_clock.period()
+    }
+
+    pub fn timer_hz(&self) -> u32 {
+        self.host_clock.frequency()
+    }
+
+    pub fn set_timer_hz(&mut self, hz: u32) -> Result<(), EmulatorError> {
+        self.host_clock.set_frequency(hz)
+    }
+
+    #[cfg(feature = "verification")]
+    pub fn set_monotonic_clock(
+        &mut self,
+        source: impl Fn() -> std::time::Instant + 'static,
+    ) -> Result<(), EmulatorError> {
+        self.host_clock.set_source(source)
+    }
+
+    #[cfg(feature = "gdb")]
+    pub(crate) fn pause_host_clock(&mut self) {
+        if self.timing == TimingPolicy::Elapsed {
+            self.host_clock
+                .pause(&mut self.bus, &mut self.processor.machine_registers);
+        }
+    }
+
+    #[cfg(feature = "gdb")]
+    pub(crate) fn resume_host_clock(&mut self) {
+        if self.timing == TimingPolicy::Elapsed {
+            self.host_clock.resume();
+        }
+    }
+
     pub fn step(&mut self) -> Result<StepOutcome, EmulatorError> {
         self.step_core(None)
     }
@@ -72,6 +119,12 @@ impl Computer {
     }
 
     fn step_core(&mut self, injected: Option<u32>) -> Result<StepOutcome, EmulatorError> {
+        if self.timing == TimingPolicy::Elapsed {
+            self.host_clock
+                .synchronize(&mut self.bus, &mut self.processor.machine_registers);
+        } else {
+            self.host_clock.reset();
+        }
         self.attempted_steps = self.attempted_steps.saturating_add(1);
         self.last_store = None;
         let inhibit = self.processor.machine_registers.counter_inhibit;
@@ -98,8 +151,7 @@ impl Computer {
         self.timing.advance(
             &mut self.bus,
             &mut self.processor.machine_registers,
-            fetched,
-            self.fetched_instructions,
+            &mut self.step_clock,
             inhibit,
             writes_cycle,
         );
@@ -253,8 +305,11 @@ impl Computer {
             }
             Fence | FenceInstruction | Hint => Ok(following),
             WaitForInterrupt => {
-                self.timing
-                    .wait_for_interrupt(&mut self.bus, &mut self.processor.machine_registers);
+                self.timing.wait_for_interrupt(
+                    &mut self.bus,
+                    &mut self.processor.machine_registers,
+                    &mut self.host_clock,
+                );
                 Ok(following)
             }
             EnvironmentCall => Err(EmulatorError::Trap {

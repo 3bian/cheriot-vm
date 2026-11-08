@@ -33,5 +33,9 @@ lto = "thin"
 overflow-checks = true
 
 [[test]]
+name = "cheriot1"
+path = "tests/cheriot.rs"
+
+[[test]]
 name = "cheriot_spec_contract"
-path = "tests/cheriot1/spec_contract.rs"
+path = "tests/cheriot/spec_contract.rs"

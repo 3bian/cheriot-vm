@@ -1,6 +1,10 @@
 // Copyright 3bian Limited and Contributors
 // SPDX-License-Identifier: MIT
 
+#[cfg(feature = "gdb")]
+#[path = "firmware/words.rs"]
+mod firmware_words;
+
 #[path = "rv32/debugger.rs"]
 mod debugger;
 #[path = "rv32/execution.rs"]

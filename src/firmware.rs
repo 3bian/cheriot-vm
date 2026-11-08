@@ -38,7 +38,7 @@ pub fn load_elf(
     load_elf_with_flags(bus, bytes, profile, 0x9, 0)
 }
 
-pub fn load_cheriot1_elf(bus: &mut Bus, bytes: &[u8]) -> Result<u32, EmulatorError> {
+pub fn load_cheriot_elf(bus: &mut Bus, bytes: &[u8]) -> Result<u32, EmulatorError> {
     load_elf_with_flags(
         bus,
         bytes,

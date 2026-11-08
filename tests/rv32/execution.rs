@@ -60,10 +60,11 @@ fn computer(compressed: bool) -> Computer {
     };
     let mut bus = Bus::new();
     bus.add_memory(
-        MemoryRegion::new("ram".into(), 0, 4096, MemoryKind::Ram, Tagging::Cheriot1).unwrap(),
+        MemoryRegion::new("ram".into(), 0, 4096, MemoryKind::Ram, Tagging::Cheriot).unwrap(),
     )
     .unwrap();
     let mut computer = Computer::new(Processor::new(profile, 0), bus);
+    computer.timing = cheriot_vm::TimingPolicy::PerStep;
     computer.trap_policy = TrapPolicy::Stop;
     computer
 }

@@ -8,7 +8,7 @@ use cheriot_vm::devices::gpio::Gpio;
 use cheriot_vm::host::HostConnections;
 use cheriot_vm::MachineConfiguration;
 
-const PROFILE: &str = include_str!("../../profiles/cheriot1.toml");
+const PROFILE: &str = include_str!("../../profiles/cheriot.toml");
 
 #[cfg(target_os = "linux")]
 #[test]
@@ -17,7 +17,7 @@ fn absent_gpio_chip_fails_with_its_path_instead_of_using_simulated_pins() {
         std::env::temp_dir().join(format!("cheriot-vm-absent-gpiochip-{}", std::process::id()));
     assert!(!chip.exists());
 
-    for profile in ["profiles/cheriot1.toml", "profiles/rv32imc.toml"] {
+    for profile in ["profiles/cheriot.toml", "profiles/rv32imc.toml"] {
         let output = Command::new(env!("CARGO_BIN_EXE_cheriot-vm"))
             .args([
                 "--profile",
@@ -60,7 +60,7 @@ fn cheriot_always_provides_in_memory_network_and_gpio_without_opening_host_devic
     for profile in [PROFILE, stripped.as_str()] {
         let mut system = MachineConfiguration::parse(profile)
             .unwrap()
-            .build_cheriot1_raw(0x80000000, &0x00000013_u32.to_le_bytes())
+            .build_cheriot_raw(0x80000000, &0x00000013_u32.to_le_bytes())
             .unwrap();
         let bus = &mut system.computer.bus;
         HostConnections::default().connect(bus).unwrap();
@@ -76,7 +76,7 @@ fn cheriot_always_provides_in_memory_network_and_gpio_without_opening_host_devic
     let collision = stripped.replace("base = 0x10000000", "base = 0x20000000");
     assert!(MachineConfiguration::parse(&collision)
         .unwrap()
-        .build_cheriot1_raw(0x80000000, &0x00000013_u32.to_le_bytes())
+        .build_cheriot_raw(0x80000000, &0x00000013_u32.to_le_bytes())
         .is_err());
 
     let custom = PROFILE
@@ -84,7 +84,7 @@ fn cheriot_always_provides_in_memory_network_and_gpio_without_opening_host_devic
         .replace("name = \"ethernet0\"", "name = \"custom-network\"");
     let system = MachineConfiguration::parse(&custom)
         .unwrap()
-        .build_cheriot1_raw(0x80000000, &0x00000013_u32.to_le_bytes())
+        .build_cheriot_raw(0x80000000, &0x00000013_u32.to_le_bytes())
         .unwrap();
     assert!(system
         .computer
@@ -151,7 +151,7 @@ fn cli_host_options_reject_invalid_pairs_targets_and_repeated_values() {
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .args([
                 "--profile",
-                "profiles/cheriot1.toml",
+                "profiles/cheriot.toml",
                 "--elf",
                 "examples/hello_world/hello_world.elf",
                 "--breakpoint",
@@ -176,7 +176,7 @@ fn old_profile_backends_produce_a_migration_error() {
         );
         let error = match MachineConfiguration::parse(&profile)
             .unwrap()
-            .build_cheriot1_raw(0x80000000, &0x00000013_u32.to_le_bytes())
+            .build_cheriot_raw(0x80000000, &0x00000013_u32.to_le_bytes())
         {
             Ok(_) => panic!("profile accepted a host backend"),
             Err(error) => error.to_string(),

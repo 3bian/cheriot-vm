@@ -6,12 +6,32 @@ use std::io::{self, Write};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum OutputPresentation {
     Compatibility,
+    #[cfg(all(feature = "gdb", target_os = "linux"))]
+    DebuggerEscaped,
     Escaped,
     Labelled,
     Raw,
 }
 
 impl OutputPresentation {
+    #[cfg(all(feature = "gdb", target_os = "linux"))]
+    pub(crate) fn debugger(raw: bool) -> Self {
+        if raw {
+            Self::Raw
+        } else {
+            Self::DebuggerEscaped
+        }
+    }
+
+    pub(crate) fn diagnostics_to_stderr(self) -> bool {
+        match self {
+            Self::Raw => true,
+            #[cfg(all(feature = "gdb", target_os = "linux"))]
+            Self::DebuggerEscaped => true,
+            _ => false,
+        }
+    }
+
     pub(crate) fn present(
         self,
         writer: &mut impl Write,
@@ -24,6 +44,14 @@ impl OutputPresentation {
         }
         match self {
             Self::Raw | Self::Compatibility => writer.write_all(bytes),
+            #[cfg(all(feature = "gdb", target_os = "linux"))]
+            Self::DebuggerEscaped => {
+                for byte in bytes {
+                    let (escaped, length) = cheriot_vm::output::debugger_escape(*byte);
+                    writer.write_all(&escaped[..length])?;
+                }
+                Ok(())
+            }
             Self::Labelled => writeln!(
                 writer,
                 "{kind} [{name}]: {}",

@@ -14,7 +14,7 @@ pub enum EmulatorError {
         address: u32,
         explanation: String,
     },
-    Cheriot1Trap {
+    CheriotTrap {
         address: u32,
         cause: u32,
         value: u32,
@@ -46,7 +46,7 @@ impl fmt::Display for EmulatorError {
             } => {
                 write!(formatter, "bus error at 0x{address:08x}: {explanation}")
             }
-            Self::Cheriot1Trap {
+            Self::CheriotTrap {
                 address,
                 cause,
                 value,

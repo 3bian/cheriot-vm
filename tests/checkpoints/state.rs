@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 use cheriot_vm::bus::Bus;
-use cheriot_vm::cheriot1::{Capability, Cheriot1System};
+use cheriot_vm::cheriot::{Capability, CheriotSystem};
 use cheriot_vm::devices::ethernet::Ethernet;
 use cheriot_vm::devices::uart::Uart;
 use cheriot_vm::memory::{MemoryKind, MemoryRegion, Tagging};
@@ -17,13 +17,14 @@ fn checkpoints_include_stores_and_tag_clearing_without_observing_devices() {
             0x8000_0000,
             128,
             MemoryKind::Ram,
-            Tagging::Cheriot1,
+            Tagging::Cheriot,
         )
         .unwrap(),
     )
     .unwrap();
     let mut system =
-        Cheriot1System::from_raw_on_bus(bus, 0x8000_0000, &0x0020_b023_u32.to_le_bytes()).unwrap();
+        CheriotSystem::from_raw_on_bus(bus, 0x8000_0000, &0x0020_b023_u32.to_le_bytes()).unwrap();
+    system.computer.timing = cheriot_vm::TimingPolicy::PerStep;
     let authority = Capability::from_memory(0x7e3e_0000_8000_0040, true);
     system
         .computer
@@ -52,9 +53,9 @@ fn checkpoints_include_stores_and_tag_clearing_without_observing_devices() {
 
 #[test]
 fn faulting_capability_load_does_not_claim_a_pending_interrupt() {
-    let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot1.toml"))
+    let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot.toml"))
         .unwrap()
-        .build_cheriot1_raw(0x8000_0000, &0x0000_a103_u32.to_le_bytes())
+        .build_cheriot_raw(0x8000_0000, &0x0000_a103_u32.to_le_bytes())
         .unwrap();
     add_uart(&mut system);
     system
@@ -79,9 +80,9 @@ fn faulting_capability_load_does_not_claim_a_pending_interrupt() {
 
 #[test]
 fn faulting_capability_store_does_not_send_or_discard_a_queued_frame() {
-    let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot1.toml"))
+    let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot.toml"))
         .unwrap()
-        .build_cheriot1_raw(0x8000_0000, &0x0020_a023_u32.to_le_bytes())
+        .build_cheriot_raw(0x8000_0000, &0x0020_a023_u32.to_le_bytes())
         .unwrap();
     system.computer.bus.write(0x2000_0008, 4, 3).unwrap();
     system
@@ -124,9 +125,9 @@ fn faulting_capability_store_does_not_send_or_discard_a_queued_frame() {
 
 #[test]
 fn faulting_capability_load_preserves_uart_input() {
-    let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot1.toml"))
+    let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot.toml"))
         .unwrap()
-        .build_cheriot1_raw(0x8000_0000, &0x0000_a103_u32.to_le_bytes())
+        .build_cheriot_raw(0x8000_0000, &0x0000_a103_u32.to_le_bytes())
         .unwrap();
     add_uart(&mut system);
     system
@@ -151,9 +152,9 @@ fn faulting_capability_load_preserves_uart_input() {
 
 #[test]
 fn faulting_capability_load_preserves_16550_uart_input() {
-    let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot1.toml"))
+    let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot.toml"))
         .unwrap()
-        .build_cheriot1_raw(0x8000_0000, &0x0000_a103_u32.to_le_bytes())
+        .build_cheriot_raw(0x8000_0000, &0x0000_a103_u32.to_le_bytes())
         .unwrap();
     system
         .computer
@@ -176,7 +177,7 @@ fn faulting_capability_load_preserves_16550_uart_input() {
     );
 }
 
-fn add_uart(system: &mut Cheriot1System) {
+fn add_uart(system: &mut CheriotSystem) {
     system
         .computer
         .bus

@@ -258,6 +258,10 @@ impl Device for Ethernet {
     fn tick(&mut self, _instructions: u64) {
         self.poll_host();
     }
+
+    fn poll_host_inputs(&mut self) {
+        self.poll_host();
+    }
 }
 
 #[cfg(test)]

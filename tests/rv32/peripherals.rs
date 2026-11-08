@@ -52,7 +52,9 @@ fn guest_trap_handler_returns_to_the_following_instruction() {
 
 #[test]
 fn peripheral_firmware_checks_registers_and_observable_devices() {
-    let config = MachineConfiguration::parse(include_str!("../../profiles/rv32imc.toml")).unwrap();
+    let mut config =
+        MachineConfiguration::parse(include_str!("../../profiles/rv32imc.toml")).unwrap();
+    config.timing = cheriot_vm::TimingPolicy::PerStep;
     let mut computer = config.build(BASE).unwrap();
     computer.trap_policy = TrapPolicy::Stop;
     load_raw(

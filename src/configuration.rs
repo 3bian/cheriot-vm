@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 use crate::bus::Bus;
-use crate::cheriot1::Cheriot1System;
+use crate::cheriot::CheriotSystem;
 use crate::completion::CompletionPolicy;
 use crate::devices::ethernet::{Ethernet, NetworkBackend};
 use crate::devices::gpio::Gpio;
@@ -58,6 +58,8 @@ pub struct MachineConfiguration {
     pub name: String,
     pub processor_profile: ProcessorProfile,
     pub processor_type: String,
+    pub steps_per_tick: u32,
+    pub timer_hz: u32,
     pub timing: TimingPolicy,
 }
 
@@ -71,7 +73,7 @@ fn profile_for(kind: &str) -> Result<ProcessorProfile, EmulatorError> {
         "rv32im" => (false, true, false),
         "rv32ic" => (false, false, true),
         "rv32imc" => (false, true, true),
-        "cheriot1" => (true, true, true),
+        "cheriot" => (true, true, true),
         _ => {
             return Err(EmulatorError::Configuration(format!(
                 "unsupported processor type: {kind}"
@@ -90,22 +92,29 @@ impl MachineConfiguration {
     pub const MAX_PROFILE_BYTES: usize = 1024 * 1024;
 
     pub fn build(self, entry: u32) -> Result<Computer, EmulatorError> {
-        if self.is_cheriot1() {
+        if self.is_cheriot() {
             return Err(EmulatorError::Configuration(
-                "CHERIoT requires build_cheriot1 or build_cheriot1_raw".into(),
+                "CHERIoT requires build_cheriot or build_cheriot_raw".into(),
             ));
         }
 
+        crate::timing_policy::validate_timer_hz(self.timer_hz)?;
+        crate::timing_policy::validate_step_period(self.timing, self.steps_per_tick)?;
+
         let profile = self.processor_profile;
         let timing = self.timing;
+        let steps_per_tick = self.steps_per_tick;
+        let timer_hz = self.timer_hz;
         let completion = self.completion.unwrap_or(CompletionPolicy::Disabled);
         let defaults = self.default_devices;
         let mut bus = self.build_bus(entry)?;
         defaults.install(&mut bus)?;
         let host_interface = completion.build(&bus, None)?;
         let mut computer = Computer::new(Processor::new(profile, entry), bus);
+        computer.set_timer_hz(timer_hz)?;
         computer.host_interface = host_interface;
         computer.timing = timing;
+        computer.set_steps_per_tick(steps_per_tick)?;
 
         Ok(computer)
     }
@@ -133,47 +142,61 @@ impl MachineConfiguration {
         Ok(computer)
     }
 
-    pub fn build_cheriot1(self, firmware: &[u8]) -> Result<Cheriot1System, EmulatorError> {
-        if !self.is_cheriot1() {
+    pub fn build_cheriot(self, firmware: &[u8]) -> Result<CheriotSystem, EmulatorError> {
+        if !self.is_cheriot() {
             return Err(EmulatorError::Configuration(
-                "build_cheriot1 requires the cheriot1 processor type".into(),
+                "build_cheriot requires the cheriot processor type".into(),
             ));
         }
 
+        crate::timing_policy::validate_timer_hz(self.timer_hz)?;
+        crate::timing_policy::validate_step_period(self.timing, self.steps_per_tick)?;
+
         let timing = self.timing;
+        let steps_per_tick = self.steps_per_tick;
+        let timer_hz = self.timer_hz;
         let defaults = self.default_devices;
         let completion = self.completion.unwrap_or(CompletionPolicy::ElfSymbol);
         let bus = self.build_bus(0)?;
-        let mut system = Cheriot1System::from_elf_with_policy(bus, firmware, defaults, completion)?;
+        let mut system = CheriotSystem::from_elf_with_policy(bus, firmware, defaults, completion)?;
+        system.computer.set_timer_hz(timer_hz)?;
         system.computer.timing = timing;
+        system.computer.set_steps_per_tick(steps_per_tick)?;
 
         Ok(system)
     }
 
-    pub fn build_cheriot1_raw(
+    pub fn build_cheriot_raw(
         self,
         address: u32,
         firmware: &[u8],
-    ) -> Result<Cheriot1System, EmulatorError> {
-        if !self.is_cheriot1() {
+    ) -> Result<CheriotSystem, EmulatorError> {
+        if !self.is_cheriot() {
             return Err(EmulatorError::Configuration(
-                "build_cheriot1_raw requires the cheriot1 processor type".into(),
+                "build_cheriot_raw requires the cheriot processor type".into(),
             ));
         }
 
+        crate::timing_policy::validate_timer_hz(self.timer_hz)?;
+        crate::timing_policy::validate_step_period(self.timing, self.steps_per_tick)?;
+
         let timing = self.timing;
+        let steps_per_tick = self.steps_per_tick;
+        let timer_hz = self.timer_hz;
         let defaults = self.default_devices;
         let completion = self.completion.unwrap_or(CompletionPolicy::Disabled);
         let bus = self.build_bus(address)?;
         let mut system =
-            Cheriot1System::from_raw_with_policy(bus, address, firmware, defaults, completion)?;
+            CheriotSystem::from_raw_with_policy(bus, address, firmware, defaults, completion)?;
+        system.computer.set_timer_hz(timer_hz)?;
         system.computer.timing = timing;
+        system.computer.set_steps_per_tick(steps_per_tick)?;
 
         Ok(system)
     }
 
-    pub fn is_cheriot1(&self) -> bool {
-        self.processor_type == "cheriot1"
+    pub fn is_cheriot(&self) -> bool {
+        self.processor_type == "cheriot"
     }
 
     pub fn parse(text: &str) -> Result<Self, EmulatorError> {
@@ -190,7 +213,7 @@ impl MachineConfiguration {
         let mut profile = profile_for(&document.processor.kind)?;
         let groups = document.processor.instruction_groups;
 
-        if document.processor.kind == "cheriot1"
+        if document.processor.kind == "cheriot"
             && (groups.multiply_divide.is_some()
                 || groups.compressed.is_some()
                 || groups.control_registers.is_some())
@@ -216,21 +239,16 @@ impl MachineConfiguration {
             profile.control_registers = value;
         }
 
-        let timing = document.machine.timing.unwrap_or_else(|| {
-            if document.processor.kind == "cheriot1" {
-                TimingPolicy::Cheriot1Compatible
-            } else {
-                TimingPolicy::PerStep
-            }
-        });
-
-        let default_devices = document.machine.default_devices.unwrap_or_else(|| {
-            if document.processor.kind == "cheriot1" {
-                DefaultDevices::Cheriot1Compatibility
-            } else {
-                DefaultDevices::Configured
-            }
-        });
+        crate::timing_policy::validate_timer_hz(document.machine.timer_hz)?;
+        crate::timing_policy::validate_step_period(
+            document.machine.timing,
+            document.machine.steps_per_tick,
+        )?;
+        let default_devices = if document.processor.kind == "cheriot" {
+            DefaultDevices::CheriotCompatibility
+        } else {
+            DefaultDevices::Configured
+        };
         Ok(Self {
             completion: document.machine.completion,
             default_devices,
@@ -239,12 +257,14 @@ impl MachineConfiguration {
             processor_profile: profile,
             memory,
             devices,
-            timing,
+            steps_per_tick: document.machine.steps_per_tick,
+            timer_hz: document.machine.timer_hz,
+            timing: document.machine.timing,
         })
     }
 
     fn build_bus(self, entry: u32) -> Result<Bus, EmulatorError> {
-        let cheriot1 = self.is_cheriot1();
+        let cheriot = self.is_cheriot();
         let required = profile_for(&self.processor_type)?;
 
         if self.name.trim().is_empty() || self.memory.is_empty() {
@@ -256,7 +276,7 @@ impl MachineConfiguration {
         if required.embedded != self.processor_profile.embedded
             || (required.multiply_divide && !self.processor_profile.multiply_divide)
             || (required.compressed && !self.processor_profile.compressed)
-            || (cheriot1 && !self.processor_profile.control_registers)
+            || (cheriot && !self.processor_profile.control_registers)
         {
             return Err(EmulatorError::Configuration(
                 "processor profile disagrees with processor type".into(),
@@ -291,8 +311,8 @@ impl MachineConfiguration {
             ));
         }
 
-        if cheriot1 {
-            self.validate_cheriot1_memory()?;
+        if cheriot {
+            self.validate_cheriot_memory()?;
         }
 
         let controller_count = self
@@ -443,15 +463,15 @@ impl MachineConfiguration {
         Ok(bus)
     }
 
-    fn validate_cheriot1_memory(&self) -> Result<(), EmulatorError> {
+    fn validate_cheriot_memory(&self) -> Result<(), EmulatorError> {
         const MEMORY_BASE: u64 = 0x8000_0000;
         const REVOCATION_BASE: u64 = 0x8300_0000;
 
         let mut highest_address = MEMORY_BASE;
         for region in self.memory.iter().filter(|region| region.kind == "ram") {
-            if region.tagging != Tagging::Cheriot1 || u64::from(region.base) < MEMORY_BASE {
+            if region.tagging != Tagging::Cheriot || u64::from(region.base) < MEMORY_BASE {
                 return Err(EmulatorError::Configuration(
-                    "CHERIoT v1 RAM must be tagged using [[cheriot1-memory]] and start at or above 0x80000000".into(),
+                    "CHERIoT RAM must be tagged using [[cheriot-memory]] and start at or above 0x80000000".into(),
                 ));
             }
             let end = u64::from(region.base)

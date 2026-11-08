@@ -1,139 +1,141 @@
 // Copyright 3bian Limited and Contributors
 // SPDX-License-Identifier: MIT
 
-use std::io;
+use std::io::Write;
 
-use cheriot_vm::execution::{ExecutionReport, StopReason};
+use cheriot_vm::bus::Bus;
+use cheriot_vm::completion::HostInterface;
+use cheriot_vm::execution::{ExecutionReport, StepReport, StopReason};
+use cheriot_vm::instructions::{DecodedInstruction, Instruction};
 use cheriot_vm::rv32::StepOutcome;
-use cheriot_vm::{Computer, EmulatorError, ExceptionCause};
+use cheriot_vm::{Computer, EmulatorError, ExceptionCause, TimingPolicy};
 
-use crate::cli::output::GuestOutput;
+use super::run_target::RunTarget;
+use crate::cli::output::{GuestOutput, OutputPresentation};
 use crate::cli::register::Register;
 use crate::cli::run_options::RunOptions;
-use crate::cli::runtime_io;
 
 pub(crate) fn run_with_options(
     mut computer: Computer,
-    mut options: RunOptions,
+    options: RunOptions,
 ) -> Result<(Computer, ExecutionReport), EmulatorError> {
-    let RunOptions {
-        steps,
-        breakpoint,
-        trace,
-        registers,
-        memory_dump,
-        presentation,
-        trap_policy,
-        ..
-    } = options;
-    computer.trap_policy = trap_policy;
-    let maximum_steps = steps.filter(|limit| *limit != 0);
-    let mut scratch = Vec::new();
-    let mut output = GuestOutput::new(io::stdout().lock())
-        .with_uart_outputs(std::mem::take(&mut options.uart.outputs));
-    let result = (|| -> Result<StopReason, EmulatorError> {
-        loop {
-            let address = computer.processor.program_counter;
-            if breakpoint == Some(address) {
-                output.diagnostic(&format!("Breakpoint at 0x{address:08x}\n"), presentation)?;
-                return Ok(StopReason::Breakpoint { address });
+    computer.trap_policy = options.trap_policy;
+    super::run_with_options(computer, options)
+}
+
+impl RunTarget for Computer {
+    type Outcome = StepOutcome;
+
+    fn position(&self) -> (u32, u64) {
+        (self.processor.program_counter, self.attempted_steps)
+    }
+
+    fn execution_report(&self, stop: StopReason) -> ExecutionReport {
+        Computer::execution_report(self, stop)
+    }
+
+    fn handle_error(
+        &mut self,
+        error: EmulatorError,
+        output: &mut GuestOutput<impl Write>,
+        presentation: OutputPresentation,
+    ) -> Result<StopReason, EmulatorError> {
+        match error {
+            EmulatorError::Trap {
+                cause: ExceptionCause::Breakpoint,
+                address,
+                ..
+            } => {
+                output.diagnostic(&format!("Guest EBREAK at 0x{address:08x}\n"), presentation)?;
+                Ok(StopReason::GuestEbreak { address })
             }
-            if maximum_steps.is_some_and(|limit| computer.attempted_steps >= limit) {
-                return Ok(StopReason::BudgetExhausted);
-            }
-            for input in &mut options.uart.inputs {
-                if computer.attempted_steps.is_multiple_of(1000) {
-                    input.poll(&mut computer.bus)?;
-                }
-            }
-            let report = match computer.step_report() {
-                Err(EmulatorError::Trap {
-                    cause: ExceptionCause::Breakpoint,
-                    address,
-                    ..
-                }) => {
-                    output
-                        .diagnostic(&format!("Guest EBREAK at 0x{address:08x}\n"), presentation)?;
-                    return Ok(StopReason::GuestEbreak { address });
-                }
-                result => result?,
-            };
-            match report.outcome {
-                StepOutcome::Executed { address, decoded } if trace => {
-                    output.diagnostic(
-                        &format!(
-                            "0x{address:08x} [{:04x}/{}]: {:?}\n",
-                            decoded.encoded, decoded.length, decoded.instruction
-                        ),
-                        presentation,
-                    )?;
-                }
-                StepOutcome::Trapped {
-                    address,
-                    cause,
-                    interrupt,
-                } => {
-                    output.diagnostic(
-                        &format!(
-                            "{} trap cause {cause} at 0x{address:08x}\n",
-                            if interrupt { "interrupt" } else { "exception" }
-                        ),
-                        presentation,
-                    )?;
-                }
-                _ => {}
-            }
-            if computer.attempted_steps.is_multiple_of(1000) || report.completion.is_some() {
-                runtime_io::drain_output(
-                    &mut computer.bus,
-                    &mut computer.host_interface,
-                    &mut scratch,
-                    &mut output,
-                    presentation,
+            error => Err(error),
+        }
+    }
+
+    fn handle_step(
+        &mut self,
+        outcome: &StepOutcome,
+        options: &RunOptions,
+        _scratch: &mut Vec<u8>,
+        output: &mut GuestOutput<impl Write>,
+        _traps: &mut u64,
+    ) -> Result<Option<StopReason>, EmulatorError> {
+        match outcome {
+            StepOutcome::Executed { address, decoded } if options.trace => {
+                output.diagnostic(
+                    &format!(
+                        "0x{address:08x} [{:04x}/{}]: {:?}\n",
+                        decoded.encoded, decoded.length, decoded.instruction
+                    ),
+                    options.presentation,
                 )?;
             }
-            if let Some(code) = report.completion {
-                return Ok(StopReason::GuestCompletion { code });
+            StepOutcome::Trapped {
+                address,
+                cause,
+                interrupt,
+            } => {
+                output.diagnostic(
+                    &format!(
+                        "{} trap cause {cause} at 0x{address:08x}\n",
+                        if *interrupt { "interrupt" } else { "exception" }
+                    ),
+                    options.presentation,
+                )?;
+            }
+            _ => {}
+        }
+        Ok(None)
+    }
+
+    fn io_parts(&mut self) -> (&mut Bus, &mut Option<HostInterface>) {
+        (&mut self.bus, &mut self.host_interface)
+    }
+
+    fn is_waiting(&self, outcome: &StepOutcome) -> bool {
+        self.timing == TimingPolicy::Elapsed
+            && matches!(
+                outcome,
+                StepOutcome::Executed {
+                    decoded: DecodedInstruction {
+                        instruction: Instruction::WaitForInterrupt,
+                        ..
+                    },
+                    ..
+                }
+            )
+    }
+
+    fn present_state(
+        &self,
+        options: &RunOptions,
+        output: &mut GuestOutput<impl Write>,
+    ) -> Result<(), EmulatorError> {
+        output.diagnostic(
+            &format!(
+                "PC=0x{:08x} retired={} cycles={} virtual_ticks={}\n",
+                self.processor.program_counter,
+                self.processor.machine_registers.retired,
+                self.processor.machine_registers.cycle,
+                self.processor.machine_registers.time
+            ),
+            options.presentation,
+        )?;
+        if let Some(selection) = &options.registers {
+            for (index, value) in self.processor.registers().iter().enumerate() {
+                if selection.includes(Register::Integer(index as u8)) {
+                    output.diagnostic(
+                        &format!("x{index:02}: 0x{value:08x} ({})\n", *value as i32),
+                        options.presentation,
+                    )?;
+                }
             }
         }
-    })();
-    let stopped = runtime_io::finish_output(
-        result,
-        &mut computer.bus,
-        &mut computer.host_interface,
-        &mut scratch,
-        &mut output,
-        presentation,
-    );
-    let restored = options.uart.restore();
-    let stop = stopped?;
-    restored?;
-    output.diagnostic(
-        &format!(
-            "PC=0x{:08x} retired={} cycles={} virtual_ticks={}\n",
-            computer.processor.program_counter,
-            computer.processor.machine_registers.retired,
-            computer.processor.machine_registers.cycle,
-            computer.processor.machine_registers.time
-        ),
-        presentation,
-    )?;
-    if let Some(selection) = registers {
-        for (index, value) in computer.processor.registers().iter().enumerate() {
-            if !selection.includes(Register::Integer(index as u8)) {
-                continue;
-            }
-            output.diagnostic(
-                &format!("x{index:02}: 0x{value:08x} ({})\n", *value as i32),
-                presentation,
-            )?;
-        }
+        Ok(())
     }
-    if let Some((start, count)) = memory_dump {
-        runtime_io::print_memory(&computer.bus, start, count, &mut output, presentation)?;
+
+    fn step_report(&mut self) -> Result<StepReport<StepOutcome>, EmulatorError> {
+        Computer::step_report(self)
     }
-    output.flush()?;
-    let report = computer.execution_report(stop);
-    runtime_io::finish_report(&report, computer.processor.program_counter, None)?;
-    Ok((computer, report))
 }

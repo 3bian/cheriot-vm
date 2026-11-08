@@ -6,8 +6,8 @@ use std::collections::VecDeque;
 use std::io::{self, ErrorKind};
 use std::rc::Rc;
 
-use cheriot_vm::cheriot1::StepOutcome;
-use cheriot_vm::cheriot1::{permissions, Capability};
+use cheriot_vm::cheriot::StepOutcome;
+use cheriot_vm::cheriot::{permissions, Capability};
 use cheriot_vm::devices::ethernet::{Ethernet, FrameTransport, NetworkBackend};
 use cheriot_vm::devices::{Device, InterruptLine};
 use cheriot_vm::host::ethernet::linux_tap;
@@ -50,21 +50,20 @@ impl FrameTransport for TestTransport {
 
 #[test]
 fn cheriot_guest_sends_and_receives_using_capability_authorized_register_access() {
-    let profile = include_str!("../../profiles/cheriot1.toml");
+    let profile = include_str!("../../profiles/cheriot.toml");
     let mut instructions: Vec<u32> = vec![
         0x03d000db, 0x20000137, 0x202080db, 0x00e00113, 0x0020a423, 0x11223137, 0x34410113,
         0x0020a623, 0x0020a623, 0x0020a623, 0x0020a623, 0x00100113, 0x0020a823, 0x0040a183,
     ];
     instructions.resize(100, 0x00000013);
     instructions.extend([0x0140a203, 0x0180a283, 0x00100113, 0x0020ae23]);
-    let bytes: Vec<_> = instructions
-        .iter()
-        .flat_map(|word| word.to_le_bytes())
-        .collect();
+    let bytes: Vec<_> = crate::firmware_words::firmware_from_words(&instructions);
     let mut system = MachineConfiguration::parse(profile)
         .unwrap()
-        .build_cheriot1_raw(0x80000000, &bytes)
+        .build_cheriot_raw(0x80000000, &bytes)
         .unwrap();
+    system.computer.timing = cheriot_vm::TimingPolicy::PerStep;
+    system.computer.set_steps_per_tick(1).unwrap();
     let (device, state) = host_device();
     state.borrow_mut().incoming.push_back(Ok(vec![0x5a; 14]));
     *system
@@ -94,7 +93,7 @@ fn cheriot_guest_sends_and_receives_using_capability_authorized_register_access(
             .read_register(3)
             .unwrap()
             .address(),
-        1
+        3
     );
     assert_eq!(
         system
@@ -158,9 +157,9 @@ fn denied_capability_stores_cannot_transmit_host_frames() {
     ];
 
     for authority in authorities {
-        let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot1.toml"))
+        let mut system = MachineConfiguration::parse(include_str!("../../profiles/cheriot.toml"))
             .unwrap()
-            .build_cheriot1_raw(0x80000000, &0x0020a023_u32.to_le_bytes())
+            .build_cheriot_raw(0x80000000, &0x0020a023_u32.to_le_bytes())
             .unwrap();
         let (mut device, state) = host_device();
         device.write(8, 4, 14).unwrap();
@@ -324,9 +323,9 @@ fn tap_exchanges_arp_frames_with_linux() {
     for cheriot in [false, true] {
         eprintln!("Checking TAP attachment with CHERIoT profile: {cheriot}");
         let mut bus = if cheriot {
-            MachineConfiguration::parse(include_str!("../../profiles/cheriot1.toml"))
+            MachineConfiguration::parse(include_str!("../../profiles/cheriot.toml"))
                 .unwrap()
-                .build_cheriot1_raw(0x80000000, &0x00000013_u32.to_le_bytes())
+                .build_cheriot_raw(0x80000000, &0x00000013_u32.to_le_bytes())
                 .unwrap()
                 .computer
                 .bus
@@ -352,7 +351,7 @@ fn tap_exchanges_arp_frames_with_linux() {
         if cheriot {
             command.args([
                 "--profile",
-                "profiles/cheriot1.toml",
+                "profiles/cheriot.toml",
                 "--elf",
                 "examples/hello_world/hello_world.elf",
                 "--breakpoint",
