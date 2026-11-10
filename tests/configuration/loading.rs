@@ -9,16 +9,10 @@ const BASE: u32 = 0x8000_0000;
 const PROFILE: &str = include_str!("../../profiles/rv32imc.toml");
 fn elf() -> Vec<u8> {
     let mut image = vec![0u8; 136];
-    image[..7].copy_from_slice(b"\x7fELF\x01\x01\x01");
-
-    for (offset, value) in [(16, 2u16), (18, 243), (40, 52), (42, 32), (44, 1)] {
-        image[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
-    }
+    crate::firmware_elf::write_elf32_header(&mut image, BASE, 0, 1);
 
     for (offset, value) in [
-        (20, 1u32),
-        (28, 52),
-        (52, 1),
+        (52, 1u32),
         (56, 128),
         (68, 4),
         (72, 8),
@@ -29,7 +23,7 @@ fn elf() -> Vec<u8> {
         image[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
     }
 
-    for offset in [24, 60, 64] {
+    for offset in [60, 64] {
         image[offset..offset + 4].copy_from_slice(&BASE.to_le_bytes());
     }
     image
@@ -74,6 +68,95 @@ fn elf_rejection_is_atomic_and_checks_alignment_addresses_and_dynamic_linking() 
     let entry = load_elf(&mut c.bus, &elf(), c.processor.profile).unwrap();
     assert_eq!(entry, BASE);
     assert_eq!(c.bus.inspect(BASE + 4, 4).unwrap(), 0);
+}
+
+#[test]
+fn elf_segment_zeros_existing_bss_and_clears_only_overlapping_tags() {
+    let mut bus = tagged_bus();
+    let before = (BASE - 8..BASE + 32)
+        .map(|address| bus.inspect(address, 1).unwrap())
+        .collect::<Vec<_>>();
+    let mut image = elf();
+    image[72..76].copy_from_slice(&20_u32.to_le_bytes());
+    let profile = MachineConfiguration::parse(PROFILE)
+        .unwrap()
+        .processor_profile;
+    assert_eq!(load_elf(&mut bus, &image, profile).unwrap(), BASE);
+
+    for address in BASE - 8..BASE + 32 {
+        let actual = bus.inspect(address, 1).unwrap();
+        let expected = if (BASE..BASE + 4).contains(&address) {
+            u32::from(image[128 + (address - BASE) as usize])
+        } else if (BASE + 4..BASE + 20).contains(&address) {
+            0
+        } else {
+            before[(address - (BASE - 8)) as usize]
+        };
+        assert_eq!(actual, expected, "address {address:#x}");
+    }
+    for (address, expected) in [
+        (BASE - 8, true),
+        (BASE, false),
+        (BASE + 8, false),
+        (BASE + 16, false),
+        (BASE + 24, true),
+    ] {
+        assert_eq!(bus.memory()[0].tag_at(address), Some(expected));
+    }
+}
+
+#[test]
+fn invalid_later_elf_segment_preserves_earlier_data_and_tags() {
+    let mut bus = tagged_bus();
+    let before = (BASE - 8..BASE + 32)
+        .map(|address| bus.inspect(address, 1).unwrap())
+        .collect::<Vec<_>>();
+    let mut image = elf();
+    image[44..46].copy_from_slice(&2_u16.to_le_bytes());
+    for (index, value) in [1_u32, 128, 0x9000_0000, 0x9000_0000, 4, 4, 5, 4]
+        .into_iter()
+        .enumerate()
+    {
+        let start = 84 + index * 4;
+        image[start..start + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    let profile = MachineConfiguration::parse(PROFILE)
+        .unwrap()
+        .processor_profile;
+    assert!(load_elf(&mut bus, &image, profile).is_err());
+    for address in BASE - 8..BASE + 32 {
+        assert_eq!(
+            bus.inspect(address, 1).unwrap(),
+            before[(address - (BASE - 8)) as usize],
+            "address {address:#x}"
+        );
+    }
+    for address in (BASE - 8..BASE + 32).step_by(8) {
+        assert_eq!(bus.memory()[0].tag_at(address), Some(true));
+    }
+}
+
+fn tagged_bus() -> cheriot_vm::bus::Bus {
+    use cheriot_vm::cheriot::Capability;
+    use cheriot_vm::memory::{MemoryKind, MemoryRegion, Tagging};
+
+    let mut bus = cheriot_vm::bus::Bus::new();
+    bus.add_memory(
+        MemoryRegion::new(
+            "ram".into(),
+            BASE - 8,
+            64,
+            MemoryKind::Ram,
+            Tagging::Cheriot,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let capability = Capability::from_memory(0x7e3e_0000_1234_5678, true);
+    for address in (BASE - 8..BASE + 32).step_by(8) {
+        bus.write_capability(address, capability).unwrap();
+    }
+    bus
 }
 
 #[test]

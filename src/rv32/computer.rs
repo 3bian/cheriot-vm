@@ -3,12 +3,9 @@
 
 use crate::bus::Bus;
 use crate::completion::HostInterface;
-use crate::devices::InterruptLine;
 use crate::error::{EmulatorError, ExceptionCause};
 use crate::execution::{ExecutionReport, StepReport, StopReason, TrapPolicy};
-use crate::instructions::{
-    decode_compressed, decode_standard, CsrOperation, DecodedInstruction, Instruction,
-};
+use crate::instructions::{decode_compressed, decode_standard, DecodedInstruction, Instruction};
 use crate::rv32::Processor;
 use crate::timing_policy::{HostClock, StepClock, TimingPolicy};
 
@@ -123,6 +120,10 @@ impl Computer {
             self.host_clock
                 .synchronize(&mut self.bus, &mut self.processor.machine_registers);
         } else {
+            crate::timing_policy::synchronize_machine_time(
+                &mut self.bus,
+                &mut self.processor.machine_registers,
+            );
             self.host_clock.reset();
         }
         self.attempted_steps = self.attempted_steps.saturating_add(1);
@@ -130,23 +131,20 @@ impl Computer {
         let inhibit = self.processor.machine_registers.counter_inhibit;
         let mut fetched = false;
         let result = self.step_inner(&mut fetched, injected);
-        let writes_counter = |low, high| {
-            matches!(&result,
-            Ok(StepOutcome::Executed { decoded: DecodedInstruction {
-                instruction: Instruction::Csr { address, operation, source, .. }, .. }, .. })
-                if (*address == low || *address == high)
-                    && operation.writes(*source))
+        let written_csr = match &result {
+            Ok(StepOutcome::Executed { decoded, .. }) => decoded.instruction.csr_write_address(),
+            _ => None,
         };
 
         if inhibit & 4 == 0
             && matches!(result, Ok(StepOutcome::Executed { .. }))
-            && !writes_counter(0xb02, 0xb82)
+            && !matches!(written_csr, Some(0xb02 | 0xb82))
         {
             self.processor.machine_registers.retired =
                 self.processor.machine_registers.retired.wrapping_add(1);
         }
 
-        let writes_cycle = writes_counter(0xb00, 0xb80);
+        let writes_cycle = matches!(written_csr, Some(0xb00 | 0xb80));
         self.fetched_instructions = self.fetched_instructions.wrapping_add(u64::from(fetched));
         self.timing.advance(
             &mut self.bus,
@@ -344,13 +342,8 @@ impl Computer {
                 } else {
                     read(source)
                 };
-                let written = match operation {
-                    CsrOperation::ReadWrite => Some(source_value),
-                    CsrOperation::ReadSet if source != 0 => Some(previous | source_value),
-                    CsrOperation::ReadClear if source != 0 => Some(previous & !source_value),
-                    _ => None,
-                };
-                if let Some(new_value) = written {
+                if operation.writes(source) {
+                    let new_value = operation.apply(previous, source_value);
                     self.processor
                         .machine_registers
                         .write(csr_address, new_value)?;
@@ -369,13 +362,8 @@ impl Computer {
     ) -> Result<StepOutcome, EmulatorError> {
         let address = self.processor.program_counter;
         self.bus.refresh_interrupts();
-        let external_pending = self.bus.interrupt_pending(InterruptLine::MachineExternal);
-        let software_pending = self.bus.interrupt_pending(InterruptLine::MachineSoftware);
-        let timer_pending = self.bus.interrupt_pending(InterruptLine::MachineTimer);
         let registers = &mut self.processor.machine_registers;
-        registers.interrupt_pending = (u32::from(external_pending) << 11)
-            | (u32::from(software_pending) << 3)
-            | (u32::from(timer_pending) << 7);
+        registers.interrupt_pending = self.bus.machine_interrupt_bits();
         let enabled = registers.interrupt_pending & registers.interrupt_enable;
         if registers.machine_status & (1 << 3) != 0 && enabled != 0 {
             let cause = if enabled & (1 << 11) != 0 {

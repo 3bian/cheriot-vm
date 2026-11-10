@@ -81,11 +81,13 @@ impl HostBus {
             }
             2 => {
                 if !self.reading {
-                    let mut read = vec![0; read_length];
-                    self.transport.transfer(address, &self.write, &mut read)?;
+                    self.read.resize(read_length, 0);
+                    if let Err(error) = self.transport.transfer(address, &self.write, &mut self.read) {
+                        self.read.clear();
+                        return Err(error);
+                    }
                     self.write.clear();
                     self.address = Some(address);
-                    self.read = read;
                     self.reading = true;
                 }
                 let value = self.read.get(self.next_read).copied().ok_or_else(|| {

@@ -76,9 +76,24 @@ impl MemoryRegion {
     }
 
     pub fn install_firmware(&mut self, address: u32, bytes: &[u8]) -> Result<(), EmulatorError> {
-        let offset = self.offset(address, bytes.len())?;
+        self.install_firmware_segment(address, bytes, bytes.len())
+    }
+
+    pub(crate) fn install_firmware_segment(
+        &mut self,
+        address: u32,
+        bytes: &[u8],
+        memory_size: usize,
+    ) -> Result<(), EmulatorError> {
+        if bytes.len() > memory_size {
+            return Err(EmulatorError::Firmware(
+                "firmware segment data exceeds its memory size".into(),
+            ));
+        }
+        let offset = self.offset(address, memory_size)?;
         self.bytes[offset..offset + bytes.len()].copy_from_slice(bytes);
-        self.clear_tags(offset, bytes.len());
+        self.bytes[offset + bytes.len()..offset + memory_size].fill(0);
+        self.clear_tags(offset, memory_size);
 
         Ok(())
     }

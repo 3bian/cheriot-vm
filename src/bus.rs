@@ -1,9 +1,11 @@
 // Copyright 3bian Limited and Contributors
 // SPDX-License-Identifier: MIT
 
+use std::any::TypeId;
 use std::cell::OnceCell;
 
 use crate::cheriot::Capability;
+use crate::devices::timer64::Timer64;
 use crate::devices::{Device, InterruptLine};
 use crate::error::EmulatorError;
 use crate::memory::MemoryRegion;
@@ -19,6 +21,8 @@ pub struct Bus {
     device_indices: OnceCell<DeviceIndices>,
     devices: Vec<DeviceMapping>,
     pub(crate) memory: Vec<MemoryRegion>,
+    pending_machine_time: Option<u64>,
+    possibly_modified_timer: Option<usize>,
 }
 
 impl Bus {
@@ -27,6 +31,8 @@ impl Bus {
             device_indices: OnceCell::new(),
             memory: Vec::new(),
             devices: Vec::new(),
+            pending_machine_time: None,
+            possibly_modified_timer: None,
         }
     }
 
@@ -35,7 +41,7 @@ impl Bus {
         name: String,
         base: u32,
         size: u32,
-        device: Box<dyn Device>,
+        mut device: Box<dyn Device>,
     ) -> Result<(), EmulatorError> {
         if self.devices.len() >= 64 {
             return Err(EmulatorError::Configuration(
@@ -50,6 +56,11 @@ impl Bus {
             )));
         }
 
+        self.collect_timer_write();
+        let written_time = device
+            .as_any_mut()
+            .downcast_mut::<Timer64>()
+            .and_then(Timer64::take_written_time);
         self.device_indices.take();
         self.devices.push(DeviceMapping {
             name,
@@ -58,6 +69,9 @@ impl Bus {
             device,
             interrupt_source: None,
         });
+        if let Some(time) = written_time {
+            self.set_machine_time(time);
+        }
 
         Ok(())
     }
@@ -116,11 +130,18 @@ impl Bus {
     }
 
     pub fn device_mut<T: 'static>(&mut self, name: &str) -> Option<&mut T> {
+        let index = self
+            .devices
+            .iter()
+            .position(|mapping| mapping.name == name)?;
+        self.collect_timer_write();
+        if TypeId::of::<T>() == TypeId::of::<Timer64>()
+            && self.devices[index].device.as_any().is::<Timer64>()
+        {
+            self.possibly_modified_timer = Some(index);
+        }
         self.device_indices.take();
-        self.devices
-            .iter_mut()
-            .find(|mapping| mapping.name == name)
-            .and_then(|mapping| mapping.device.as_any_mut().downcast_mut::<T>())
+        self.devices[index].device.as_any_mut().downcast_mut::<T>()
     }
 
     pub fn devices(&self) -> &[DeviceMapping] {
@@ -180,16 +201,25 @@ impl Bus {
     }
 
     pub fn install_firmware(&mut self, address: u32, bytes: &[u8]) -> Result<(), EmulatorError> {
+        self.install_firmware_segment(address, bytes, bytes.len())
+    }
+
+    pub(crate) fn install_firmware_segment(
+        &mut self,
+        address: u32,
+        bytes: &[u8],
+        memory_size: usize,
+    ) -> Result<(), EmulatorError> {
         self.memory
             .iter_mut()
-            .find(|region| region.contains(address, bytes.len()))
+            .find(|region| region.contains(address, memory_size))
             .ok_or_else(|| {
                 EmulatorError::Firmware(format!(
                     "firmware segment 0x{address:08x} ({} bytes) is not fully mapped",
-                    bytes.len()
+                    memory_size
                 ))
             })?
-            .install_firmware(address, bytes)
+            .install_firmware_segment(address, bytes, memory_size)
     }
 
     pub fn interrupt_pending(&self, line: InterruptLine) -> bool {
@@ -203,6 +233,12 @@ impl Bus {
         devices
             .iter()
             .any(|&index| self.devices[index].device.interrupt_pending(line))
+    }
+
+    pub(crate) fn machine_interrupt_bits(&self) -> u32 {
+        (u32::from(self.interrupt_pending(InterruptLine::MachineExternal)) << 11)
+            | (u32::from(self.interrupt_pending(InterruptLine::MachineSoftware)) << 3)
+            | (u32::from(self.interrupt_pending(InterruptLine::MachineTimer)) << 7)
     }
 
     pub fn memory(&self) -> &[MemoryRegion] {
@@ -288,6 +324,7 @@ impl Bus {
     }
 
     pub fn remove_device(&mut self, name: &str) -> Option<DeviceMapping> {
+        self.collect_timer_write();
         let index = self
             .devices
             .iter()
@@ -350,12 +387,17 @@ impl Bus {
     }
 
     pub fn tick_devices(&mut self, ticks: u64) {
+        self.collect_timer_write();
         for mapping in &mut self.devices {
             mapping.device.tick(ticks);
+        }
+        if let Some(time) = &mut self.pending_machine_time {
+            *time = time.wrapping_add(ticks);
         }
     }
 
     pub fn write(&mut self, address: u32, width: usize, value: u32) -> Result<(), EmulatorError> {
+        self.collect_timer_write();
         if !matches!(width, 1 | 2 | 4) {
             return Err(EmulatorError::Bus {
                 address,
@@ -376,16 +418,57 @@ impl Bus {
             .iter_mut()
             .find(|mapping| mapping.contains(address, width))
         {
-            return mapping
+            let offset = address - mapping.base;
+            mapping
                 .device
-                .write(address - mapping.base, width, value)
-                .map_err(|error| device_error(address, error));
+                .write(offset, width, value)
+                .map_err(|error| device_error(address, error))?;
+            let written_time = if matches!(offset, 0xbff8 | 0xbffc) {
+                mapping
+                    .device
+                    .as_any_mut()
+                    .downcast_mut::<Timer64>()
+                    .and_then(Timer64::take_written_time)
+            } else {
+                None
+            };
+            if let Some(time) = written_time {
+                self.set_machine_time(time);
+            }
+            return Ok(());
         }
 
         Err(EmulatorError::Bus {
             address,
             explanation: "unmapped write".into(),
         })
+    }
+
+    pub(crate) fn take_machine_time(&mut self) -> Option<u64> {
+        self.collect_timer_write();
+        self.pending_machine_time.take()
+    }
+
+    fn collect_timer_write(&mut self) {
+        if let Some(index) = self.possibly_modified_timer.take() {
+            let written_time = self.devices[index]
+                .device
+                .as_any_mut()
+                .downcast_mut::<Timer64>()
+                .and_then(Timer64::take_written_time);
+            if let Some(time) = written_time {
+                self.set_machine_time(time);
+            }
+        }
+    }
+
+    fn set_machine_time(&mut self, time: u64) {
+        for mapping in &mut self.devices {
+            if let Some(timer) = mapping.device.as_any_mut().downcast_mut::<Timer64>() {
+                timer.set_time(time);
+            }
+        }
+        self.pending_machine_time = Some(time);
     }
 
     pub fn write_capability(

@@ -245,13 +245,11 @@ fn load_elf_with_flags(
     }
 
     for segment in segments {
-        let mut image = vec![0_u8; segment.memory_size];
-        image[..segment.file_size].copy_from_slice(slice_at(
-            bytes,
-            segment.file_offset,
-            segment.file_size,
-        )?);
-        bus.install_firmware(segment.address, &image)?;
+        bus.install_firmware_segment(
+            segment.address,
+            slice_at(bytes, segment.file_offset, segment.file_size)?,
+            segment.memory_size,
+        )?;
     }
 
     Ok(entry)

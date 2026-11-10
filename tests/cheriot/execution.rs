@@ -98,7 +98,8 @@ fn cheriot_uart_divisor_latch_and_clint_accesses_are_explicit() {
     clint.write(0, 4, 1).unwrap();
     assert!(clint.interrupt_pending(InterruptLine::MachineSoftware));
     assert!(clint.interrupt_pending(InterruptLine::MachineTimer));
-    assert!(clint.write(0xbff8, 4, 0).is_err());
+    clint.write(0xbff8, 4, 0).unwrap();
+    assert_eq!(clint.read(0xbff8, 4).unwrap(), 0);
     assert!(clint.read(0x4000, 2).is_err());
 }
 

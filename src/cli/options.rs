@@ -89,9 +89,7 @@ impl Options {
                 }
                 "--address" => {
                     let text = required_argument(arguments, &mut index, "--address")?;
-                    raw_address = u32::try_from(parse_unsigned(&text)?).map_err(|_| {
-                        EmulatorError::Configuration("raw address exceeds 32 bits".into())
-                    })?;
+                    raw_address = parse_u32(&text, "raw address exceeds 32 bits")?;
                 }
                 "--steps" => {
                     let text = required_argument(arguments, &mut index, "--steps")?;
@@ -99,9 +97,7 @@ impl Options {
                 }
                 "--breakpoint" => {
                     let text = required_argument(arguments, &mut index, "--breakpoint")?;
-                    breakpoint = Some(u32::try_from(parse_unsigned(&text)?).map_err(|_| {
-                        EmulatorError::Configuration("breakpoint address exceeds 32 bits".into())
-                    })?);
+                    breakpoint = Some(parse_u32(&text, "breakpoint address exceeds 32 bits")?);
                 }
                 "--memory" => {
                     let value = required_argument(arguments, &mut index, "--memory")?;
@@ -110,9 +106,7 @@ impl Options {
                     let address = settings.get("address").ok_or_else(|| {
                         EmulatorError::Configuration("--memory requires address=ADDRESS".into())
                     })?;
-                    let start = u32::try_from(parse_unsigned(address)?).map_err(|_| {
-                        EmulatorError::Configuration("memory address exceeds 32 bits".into())
-                    })?;
+                    let start = parse_u32(address, "memory address exceeds 32 bits")?;
                     let count = settings
                         .get("length")
                         .map_or(Ok(16), |value| parse_unsigned(value))?;
@@ -166,13 +160,10 @@ impl Options {
                     let policy = match text.as_str() {
                         "disabled" => CompletionPolicy::Disabled,
                         "elf-symbol" => CompletionPolicy::ElfSymbol,
-                        _ => CompletionPolicy::Address(
-                            u32::try_from(parse_unsigned(&text)?).map_err(|_| {
-                                EmulatorError::Configuration(
-                                    "completion address exceeds 32 bits".into(),
-                                )
-                            })?,
-                        ),
+                        _ => CompletionPolicy::Address(parse_u32(
+                            &text,
+                            "completion address exceeds 32 bits",
+                        )?),
                     };
                     completion = Some(policy);
                 }
@@ -312,6 +303,11 @@ impl Options {
             trap_policy,
         })
     }
+}
+
+pub(super) fn parse_u32(value: &str, overflow_message: &str) -> Result<u32, EmulatorError> {
+    u32::try_from(parse_unsigned(value)?)
+        .map_err(|_| EmulatorError::Configuration(overflow_message.into()))
 }
 
 pub(super) fn parse_unsigned(value: &str) -> Result<u64, EmulatorError> {

@@ -54,6 +54,55 @@ fn arguments(options: &[&str]) -> Vec<String> {
 }
 
 #[test]
+fn checked_numbers_preserve_parsing_and_option_specific_errors() {
+    for (text, expected) in [
+        ("0", 0),
+        ("+42", 42),
+        ("42", 42),
+        ("0x2a", 42),
+        ("4294967295", u32::MAX),
+        ("0xffffffff", u32::MAX),
+    ] {
+        assert_eq!(parse_u32(text, "too large").unwrap(), expected, "{text}");
+    }
+    for text in ["-1", " 1", "1 ", "0X10", "0x", "18446744073709551616"] {
+        assert_eq!(
+            parse_u32(text, "too large").unwrap_err().to_string(),
+            format!("configuration error: invalid number: {text}")
+        );
+    }
+
+    for (flag, prefix, message) in [
+        ("--address", "", "raw address exceeds 32 bits"),
+        ("--breakpoint", "", "breakpoint address exceeds 32 bits"),
+        ("--memory", "address=", "memory address exceeds 32 bits"),
+        ("--completion", "", "completion address exceeds 32 bits"),
+        (
+            "--gpio",
+            "path=/dev/gpiochip0,lines=",
+            "GPIO line offset exceeds 32 bits",
+        ),
+        (
+            "--uart",
+            "in=/dev/stdin,baud=",
+            "UART baud rate exceeds 32 bits",
+        ),
+    ] {
+        for number in ["4294967296", "0x100000000"] {
+            let value = format!("{prefix}{number}");
+            let error = Options::parse(&arguments(&[flag, &value])).err().unwrap();
+            assert_eq!(error.to_string(), format!("configuration error: {message}"));
+        }
+        let value = format!("{prefix}0xg");
+        let error = Options::parse(&arguments(&[flag, &value])).err().unwrap();
+        assert_eq!(
+            error.to_string(),
+            "configuration error: invalid number: 0xg"
+        );
+    }
+}
+
+#[test]
 fn connection_settings_allow_reordering_and_repeated_flags_for_different_devices() {
     let options = Options::parse(&arguments(&[
         "--uart",

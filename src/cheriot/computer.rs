@@ -9,9 +9,8 @@ use super::{
 };
 use crate::bus::Bus;
 use crate::cheriot::{permissions, Capability, CapabilityFaultCause};
-use crate::devices::InterruptLine;
 use crate::instructions::arithmetic::{perform_immediate_operation, perform_register_operation};
-use crate::instructions::{CsrOperation, Instruction};
+use crate::instructions::Instruction;
 use crate::timing_policy::{HostClock, StepClock, TimingPolicy};
 
 pub struct Computer {
@@ -109,6 +108,10 @@ impl Computer {
             self.host_clock
                 .synchronize(&mut self.bus, &mut self.processor.machine_registers);
         } else {
+            crate::timing_policy::synchronize_machine_time(
+                &mut self.bus,
+                &mut self.processor.machine_registers,
+            );
             self.host_clock.reset();
         }
         #[cfg(feature = "verification")]
@@ -124,9 +127,7 @@ impl Computer {
         self.last_store = None;
         self.bus.refresh_interrupts();
         let pending = (self.processor.machine_registers.interrupt_pending & 0x222)
-            | (u32::from(self.bus.interrupt_pending(InterruptLine::MachineExternal)) << 11)
-            | (u32::from(self.bus.interrupt_pending(InterruptLine::MachineSoftware)) << 3)
-            | (u32::from(self.bus.interrupt_pending(InterruptLine::MachineTimer)) << 7);
+            | self.bus.machine_interrupt_bits();
         self.processor.machine_registers.interrupt_pending = pending;
         let enabled = pending & self.processor.machine_registers.interrupt_enable;
 
@@ -153,21 +154,19 @@ impl Computer {
                 .and_then(|decoded| self.execute(decoded).map(|()| decoded))
         };
 
-        let writes_cycle = match &result {
-            Ok(decoded) => matches!(decoded.operation,
-                Operation::Integer(Instruction::Csr {
-                    address: 0xb00 | 0xb80, operation, source, ..
-                }) if operation.writes(source)),
-            Err(_) => false,
+        let written_csr = match &result {
+            Ok(decoded) => match decoded.operation {
+                Operation::Integer(instruction) => instruction.csr_write_address(),
+                _ => None,
+            },
+            Err(_) => None,
         };
+        let writes_cycle = matches!(written_csr, Some(0xb00 | 0xb80));
 
         self.attempted_steps = self.attempted_steps.wrapping_add(1);
         let outcome = match result {
             Ok(decoded) => {
-                let writes_retired = matches!(decoded.operation,
-                    Operation::Integer(Instruction::Csr {
-                        address: 0xb02 | 0xb82, operation, source, ..
-                    }) if operation.writes(source));
+                let writes_retired = matches!(written_csr, Some(0xb02 | 0xb82));
 
                 if increment_retired && !writes_retired {
                     self.processor.machine_registers.retired =
@@ -208,9 +207,7 @@ impl Computer {
 
         self.processor.machine_registers.interrupt_pending =
             (self.processor.machine_registers.interrupt_pending & 0x222)
-                | (u32::from(self.bus.interrupt_pending(InterruptLine::MachineExternal)) << 11)
-                | (u32::from(self.bus.interrupt_pending(InterruptLine::MachineSoftware)) << 3)
-                | (u32::from(self.bus.interrupt_pending(InterruptLine::MachineTimer)) << 7);
+                | self.bus.machine_interrupt_bits();
 
         #[cfg(feature = "verification")]
         self.processor.end_observation();
@@ -682,11 +679,7 @@ impl Computer {
                         .ok_or_else(Fault::illegal)?,
                 };
                 if writing {
-                    let written = match operation {
-                        CsrOperation::ReadWrite => value,
-                        CsrOperation::ReadSet => previous | value,
-                        CsrOperation::ReadClear => previous & !value,
-                    };
+                    let written = operation.apply(previous, value);
                     match address {
                         0x304 => {
                             self.processor.machine_registers.interrupt_enable = written & 0xaaa

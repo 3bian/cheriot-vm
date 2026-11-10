@@ -69,3 +69,17 @@ pub enum Instruction {
     },
     WaitForInterrupt,
 }
+
+impl Instruction {
+    pub(crate) fn csr_write_address(self) -> Option<u16> {
+        match self {
+            Self::Csr {
+                address,
+                operation,
+                source,
+                ..
+            } if operation.writes(source) => Some(address),
+            _ => None,
+        }
+    }
+}

@@ -1,6 +1,8 @@
 // Copyright 3bian Limited and Contributors
 // SPDX-License-Identifier: MIT
 
+#[path = "firmware/elf.rs"]
+mod firmware_elf;
 #[path = "firmware/words.rs"]
 mod firmware_words;
 

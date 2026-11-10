@@ -4,7 +4,7 @@
 use cheriot_vm::host::uart::settings::UartSettings;
 use cheriot_vm::EmulatorError;
 
-use crate::cli::{device_settings, options::parse_unsigned};
+use crate::cli::{device_settings, options::parse_u32};
 
 pub(crate) struct UartOptions {
     pub device: Option<String>,
@@ -40,13 +40,7 @@ impl UartOptions {
         {
             let baud = settings
                 .get("baud")
-                .map(|value| {
-                    parse_unsigned(value).and_then(|value| {
-                        u32::try_from(value).map_err(|_| {
-                            EmulatorError::Configuration("UART baud rate exceeds 32 bits".into())
-                        })
-                    })
-                })
+                .map(|value| parse_u32(value, "UART baud rate exceeds 32 bits"))
                 .transpose()?;
             let data_bits = settings.get("data-bits").map_or(Ok(8), |value| {
                 value

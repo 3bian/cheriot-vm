@@ -216,6 +216,105 @@ fn invalid_and_duplicate_bindings_do_not_truncate_output_files() {
 }
 
 #[test]
+fn aliased_uart_output_files_are_rejected_before_truncation() {
+    use std::os::unix::fs::symlink;
+
+    let guest = Guest::new("rv32imc", true, false);
+    let path = guest.directory.join("preserved");
+    let symlink_path = guest.directory.join("symlink");
+    let hardlink_path = guest.directory.join("hardlink");
+    fs::write(&path, b"preserve me").unwrap();
+    symlink(&path, &symlink_path).unwrap();
+    fs::hard_link(&path, &hardlink_path).unwrap();
+
+    for alias in [
+        format!("{}/./preserved", guest.directory.display()),
+        symlink_path.display().to_string(),
+        hardlink_path.display().to_string(),
+    ] {
+        let output = guest
+            .command()
+            .args([
+                "--uart",
+                &format!("device=uart0,out={}", path.display()),
+                "--uart",
+                &format!("device=serial1,out={alias}"),
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "alias {alias}");
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("only be bound once"), "{alias}: {error}");
+        assert_eq!(fs::read(&path).unwrap(), b"preserve me", "{alias}");
+    }
+}
+
+#[test]
+fn unavailable_later_uart_output_does_not_truncate_an_earlier_file() {
+    let guest = Guest::new("rv32imc", true, false);
+    let path = guest.directory.join("preserved");
+    fs::write(&path, b"preserve me").unwrap();
+    let output = guest
+        .command()
+        .args([
+            "--uart",
+            &format!("device=uart0,out={}", path.display()),
+            "--uart",
+            &format!(
+                "device=serial1,out={}",
+                guest.directory.join("missing").join("output").display()
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(fs::read(path).unwrap(), b"preserve me");
+}
+
+#[test]
+fn shared_stdout_aliases_remain_available_to_multiple_uarts() {
+    let guest = Guest::new("rv32imc", true, false);
+    let output = guest
+        .command()
+        .args([
+            "--uart",
+            "device=uart0,out=/dev/stdout",
+            "--uart",
+            "device=serial1,out=/dev/fd/1",
+            "--output",
+            "raw",
+        ])
+        .output()
+        .unwrap();
+    success(&output);
+    assert_eq!(output.stdout, b"AA");
+}
+
+#[test]
+fn dedicated_uart_output_cannot_truncate_the_redirected_stdout_file() {
+    let guest = Guest::new("rv32imc", true, false);
+    let path = guest.directory.join("stdout");
+    fs::write(&path, b"preserve me").unwrap();
+    let stdout = fs::OpenOptions::new().append(true).open(&path).unwrap();
+    let output = guest
+        .command()
+        .args([
+            "--uart",
+            "device=uart0,out=/dev/stdout",
+            "--uart",
+            &format!("device=serial1,out={}", path.display()),
+            "--output",
+            "raw",
+        ])
+        .stdout(stdout)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("only be bound once"));
+    assert_eq!(fs::read(path).unwrap(), b"preserve me");
+}
+
+#[test]
 fn multiple_serial_devices_route_each_input_and_output_by_name_in_any_order() {
     for profile in ["cheriot", "rv32e", "rv32imc"] {
         let guest = Guest::new(profile, true, true);

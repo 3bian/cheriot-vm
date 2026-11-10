@@ -834,6 +834,247 @@ base = 0x10003000
 }
 
 #[test]
+fn interrupt_refresh_preserves_only_cheriot_software_pending_bits() {
+    for processor in PROCESSORS {
+        for timing in [TimingPolicy::PerStep, TimingPolicy::Elapsed] {
+            let mut computer = TestComputer::new(processor, timing, &[NOP], "timer64");
+            computer.registers().interrupt_pending = 0x222;
+            computer.registers().interrupt_enable = 0;
+            assert_eq!(computer.step(), None, "{processor}/{timing:?}");
+            assert_eq!(
+                computer.registers().interrupt_pending & 0x222,
+                if processor == "cheriot" { 0x222 } else { 0 },
+                "{processor}/{timing:?}"
+            );
+        }
+    }
+}
+
+#[cfg(feature = "verification")]
+#[test]
+fn writable_machine_time_remains_coherent_under_both_timing_policies() {
+    use std::time::Duration;
+
+    for processor in HOST_PROCESSORS {
+        for timing in [TimingPolicy::PerStep, TimingPolicy::Elapsed] {
+            let mut computer = TestComputer::new(processor, timing, &[NOP], "timer64");
+            let clock = if timing == TimingPolicy::Elapsed {
+                Some(computer.use_clock())
+            } else {
+                computer.set_steps_per_tick(100).unwrap();
+                None
+            };
+            computer.registers().counter_inhibit = 5;
+            computer.bus().write(0x0200_4004, 4, 1).unwrap();
+            computer.bus().write(0x0200_4000, 4, 6).unwrap();
+            computer.bus().write(0x0200_bffc, 4, 1).unwrap();
+            computer.bus().write(0x0200_bff8, 4, 5).unwrap();
+            assert!(!computer
+                .bus()
+                .interrupt_pending(InterruptLine::MachineTimer));
+            computer.step_nop();
+            assert_eq!(computer.registers().time, (1_u64 << 32) + 5);
+            if processor != "cheriot" {
+                assert_eq!(computer.registers().read(0xc01), Some(5));
+                assert_eq!(computer.registers().read(0xc81), Some(1));
+            }
+
+            computer.bus().write(0x0200_bff8, 4, 6).unwrap();
+            assert!(computer
+                .bus()
+                .interrupt_pending(InterruptLine::MachineTimer));
+            computer.step_nop();
+            assert_eq!(computer.registers().time, (1_u64 << 32) + 6);
+            computer.bus().write(0x0200_bff8, 4, 2).unwrap();
+            assert!(!computer
+                .bus()
+                .interrupt_pending(InterruptLine::MachineTimer));
+            computer.step_nop();
+            assert_eq!(computer.registers().time, (1_u64 << 32) + 2);
+
+            if let Some(clock) = clock {
+                advance(&clock, Duration::from_micros(500));
+                computer.step_nop();
+            } else {
+                for _ in 0..100 {
+                    computer.step_nop();
+                }
+            }
+            assert_eq!(computer.registers().time, (1_u64 << 32) + 3);
+            assert_eq!(computer.bus().read(0x0200_bff8, 4).unwrap(), 3);
+            assert_eq!(computer.bus().read(0x0200_bffc, 4).unwrap(), 1);
+            assert_eq!(
+                (computer.registers().cycle, computer.registers().retired),
+                (0, 0)
+            );
+        }
+    }
+}
+
+#[cfg(feature = "verification")]
+#[test]
+fn guest_machine_time_stores_update_rv32_csr_views_and_cheriot_timer() {
+    use cheriot_vm::cheriot::Capability;
+
+    for processor in HOST_PROCESSORS {
+        for timing in [TimingPolicy::PerStep, TimingPolicy::Elapsed] {
+            let mut computer =
+                TestComputer::new(processor, timing, &[0x0020_a023, 0xc010_21f3], "timer64");
+            if timing == TimingPolicy::Elapsed {
+                computer.use_clock();
+            } else {
+                computer.set_steps_per_tick(100).unwrap();
+            }
+            match &mut computer {
+                TestComputer::Capability(system) => {
+                    system
+                        .computer
+                        .processor
+                        .write_register(1, Capability::from_memory(0x7e3e_0000_0200_bff8, true))
+                        .unwrap();
+                    system
+                        .computer
+                        .processor
+                        .write_integer_register(2, 0x1234_5678)
+                        .unwrap();
+                }
+                TestComputer::Integer(computer) => {
+                    computer.processor.write_register(1, 0x0200_bff8).unwrap();
+                    computer.processor.write_register(2, 0x1234_5678).unwrap();
+                }
+            }
+            assert_eq!(computer.step(), None, "{processor}/{timing:?}");
+            assert_eq!(computer.bus().read(0x0200_bff8, 4).unwrap(), 0x1234_5678);
+            assert_eq!(computer.registers().time, 0x1234_5678);
+            if let TestComputer::Integer(computer) = &mut computer {
+                assert!(matches!(
+                    computer.step().unwrap(),
+                    StepOutcome::Executed { .. }
+                ));
+                assert_eq!(computer.processor.read_register(3).unwrap(), 0x1234_5678);
+            }
+        }
+    }
+}
+
+#[test]
+fn machine_time_writes_synchronize_multiple_timer64_devices() {
+    use cheriot_vm::devices::{timer64::Timer64, Device};
+
+    let mut computer = TestComputer::new("rv32imc", TimingPolicy::PerStep, &[NOP], "timer64");
+    computer.set_steps_per_tick(100).unwrap();
+    computer
+        .bus()
+        .add_device(
+            "second".into(),
+            0x0400_0000,
+            0xc0000,
+            Box::new(Timer64::new()),
+        )
+        .unwrap();
+    computer.bus().write(0x0200_4000, 4, 15).unwrap();
+    computer.bus().write(0x0400_4000, 4, 25).unwrap();
+    computer.bus().write(0x0400_bff8, 4, 12).unwrap();
+    assert_eq!(computer.bus().read(0x0200_bff8, 4).unwrap(), 12);
+    assert_eq!(computer.bus().read(0x0400_bff8, 4).unwrap(), 12);
+    assert_eq!(computer.step(), None);
+    assert_eq!(computer.registers().time, 12);
+
+    computer
+        .bus()
+        .device_mut::<Timer64>("timer0")
+        .unwrap()
+        .write(0xbff8, 4, 21)
+        .unwrap();
+    computer.set_program_counter(ENTRY);
+    assert_eq!(computer.step(), None);
+    assert_eq!(computer.bus().read(0x0400_bff8, 4).unwrap(), 21);
+    assert_eq!(computer.registers().time, 21);
+    assert!(computer
+        .bus()
+        .device::<Timer64>("timer0")
+        .unwrap()
+        .interrupt_pending(InterruptLine::MachineTimer));
+    assert!(!computer
+        .bus()
+        .device::<Timer64>("second")
+        .unwrap()
+        .interrupt_pending(InterruptLine::MachineTimer));
+
+    computer
+        .bus()
+        .device_mut::<Timer64>("second")
+        .unwrap()
+        .write(0xbff8, 4, 30)
+        .unwrap();
+    computer.bus().remove_device("timer0").unwrap();
+    computer.bus().tick_devices(1);
+    computer.set_program_counter(ENTRY);
+    assert_eq!(computer.step(), None);
+    assert_eq!(computer.bus().read(0x0400_bff8, 4).unwrap(), 31);
+    assert_eq!(computer.registers().time, 31);
+}
+
+#[test]
+fn machine_time_writes_update_interrupt_delivery_and_wrap() {
+    for processor in HOST_PROCESSORS {
+        let mut computer = TestComputer::new(processor, TimingPolicy::PerStep, &[NOP], "timer64");
+        computer.set_steps_per_tick(100).unwrap();
+        computer.bus().write(0x0200_4000, 4, 20).unwrap();
+        computer.bus().write(0x0200_bff8, 4, 19).unwrap();
+        computer.registers().machine_status |= 8;
+        computer.registers().interrupt_enable = 0;
+        assert_eq!(computer.step(), None);
+        computer.bus().write(0x0200_bff8, 4, 20).unwrap();
+        computer.set_program_counter(ENTRY);
+        assert_eq!(computer.step(), None);
+        assert_ne!(computer.registers().interrupt_pending & 0x80, 0);
+        computer.registers().interrupt_enable = 0x80;
+        computer.set_program_counter(ENTRY);
+        assert_eq!(computer.step(), Some(0x8000_0007), "{processor}");
+
+        computer.bus().write(0x0200_4000, 4, 1).unwrap();
+        computer.bus().write(0x0200_bffc, 4, u32::MAX).unwrap();
+        computer.bus().write(0x0200_bff8, 4, u32::MAX).unwrap();
+        assert!(computer
+            .bus()
+            .interrupt_pending(InterruptLine::MachineTimer));
+        computer.bus().tick_devices(1);
+        assert!(!computer
+            .bus()
+            .interrupt_pending(InterruptLine::MachineTimer));
+        computer.registers().interrupt_enable = 0;
+        computer.set_program_counter(ENTRY);
+        assert_eq!(computer.step(), None);
+        assert_eq!(computer.registers().time, 0);
+        assert_eq!(computer.bus().read(0x0200_bff8, 4).unwrap(), 0);
+        assert_eq!(computer.bus().read(0x0200_bffc, 4).unwrap(), 0);
+    }
+}
+
+#[cfg(feature = "verification")]
+#[test]
+fn writing_machine_time_keeps_fractional_elapsed_progress() {
+    use std::time::Duration;
+
+    for processor in HOST_PROCESSORS {
+        let mut computer = TestComputer::new(processor, TimingPolicy::Elapsed, &[NOP], "timer64");
+        let clock = computer.use_clock();
+        computer.step_nop();
+        advance(&clock, Duration::from_micros(250));
+        computer.step_nop();
+        assert_eq!(computer.registers().time, 0);
+        computer.bus().write(0x0200_bff8, 4, 100).unwrap();
+        computer.step_nop();
+        assert_eq!(computer.registers().time, 100);
+        advance(&clock, Duration::from_micros(250));
+        computer.step_nop();
+        assert_eq!(computer.registers().time, 101);
+        assert_eq!(computer.bus().read(0x0200_bff8, 4).unwrap(), 101);
+    }
+}
+
+#[test]
 fn step_quantum_accumulates_exactly_on_every_processor_and_preserves_retirement() {
     for processor in HOST_PROCESSORS {
         let mut computer =

@@ -11,7 +11,7 @@ pub mod gpio;
 pub mod i2c;
 pub mod interrupt_controller;
 mod interrupt_line;
-mod output_capture;
+pub(crate) mod output_capture;
 pub mod spi;
 pub mod storage;
 pub mod timer32;

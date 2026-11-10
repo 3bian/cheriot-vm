@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #[derive(Default)]
-pub(super) struct OutputCapture {
+pub(crate) struct OutputCapture {
     bytes: Vec<u8>,
 }
 

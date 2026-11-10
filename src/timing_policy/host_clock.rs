@@ -98,6 +98,7 @@ impl HostClock {
     }
 
     pub(crate) fn synchronize(&mut self, bus: &mut Bus, registers: &mut MachineRegisters) {
+        super::synchronize_machine_time(bus, registers);
         if self.paused {
             return;
         }

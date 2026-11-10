@@ -76,7 +76,9 @@ fn timer64_selects_the_same_registers_on_both_profiles() {
         bus.write(0x0200_0000, 4, 1).unwrap();
         assert!(bus.interrupt_pending(InterruptLine::MachineSoftware));
         assert_eq!(bus.read(0x0200_bffc, 4).unwrap(), 0);
-        assert!(bus.write(0x0200_bff8, 4, 0).is_err());
+        bus.write(0x0200_bff8, 4, 0).unwrap();
+        assert_eq!(bus.read(0x0200_bff8, 4).unwrap(), 0);
+        assert!(!bus.interrupt_pending(InterruptLine::MachineTimer));
     }
 }
 

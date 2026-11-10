@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #[cfg(all(feature = "gdb", target_os = "linux"))]
+#[path = "firmware/elf.rs"]
+mod firmware_elf;
+#[cfg(all(feature = "gdb", target_os = "linux"))]
 #[path = "firmware/words.rs"]
 mod firmware_words;
 

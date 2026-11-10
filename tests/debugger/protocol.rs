@@ -5,6 +5,7 @@
 
 use std::fs;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -28,18 +29,10 @@ fn assert_htif_routing(device: &str, detach: bool) {
             (0x1b, false, b"\\x1b"),
             (0x1b, true, b"\x1b"),
         ] {
-            let configuration = std::env::temp_dir().join(format!(
-                "vm-debugger-output-{}-{}.toml",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::write(
-                &configuration,
-                fs::read_to_string(format!("profiles/{profile}.toml"))
-                    .unwrap()
-                    .replace("name = \"uart0\"", &format!("name = \"{device}\"")),
-            )
-            .unwrap();
+            let text = fs::read_to_string(format!("profiles/{profile}.toml"))
+                .unwrap()
+                .replace("name = \"uart0\"", &format!("name = \"{device}\""));
+            let configuration = write_temporary_profile("vm-debugger-output", &text);
             let (reader, writer) = pipe2(OFlag::O_CLOEXEC).unwrap();
             let uart = format!(
                 "device={device},out=/proc/{}/fd/{}",
@@ -80,18 +73,12 @@ fn assert_htif_routing(device: &str, detach: bool) {
 
 fn boundary_elf(profile: &str) -> Vec<u8> {
     let mut image = vec![0_u8; 0x108];
-    image[..7].copy_from_slice(b"\x7fELF\x01\x01\x01");
-    for (offset, value) in [(16, 2_u16), (18, 243), (40, 52), (42, 32), (44, 2)] {
-        image[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
-    }
     let flags = match profile {
         "cheriot" => 0x70009,
         "rv32ec" => 9,
         _ => 1,
     };
-    for (offset, value) in [(20, 1_u32), (24, 0x8000_0ffe), (28, 52), (36, flags)] {
-        image[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
-    }
+    crate::firmware_elf::write_elf32_header(&mut image, 0x8000_0ffe, flags, 2);
     for (index, (address, offset, size)) in
         [(0x8000_0ffe_u32, 0x100_u32, 2_u32), (0x8000_1000, 0x102, 6)]
             .into_iter()
@@ -167,12 +154,8 @@ fn debugger_breakpoints_support_instructions_spanning_executable_regions() {
     let mut mismatches = Vec::new();
     for profile in ["cheriot", "rv32ec", "rv32imc"] {
         for split in [false, true] {
-            let configuration = std::env::temp_dir().join(format!(
-                "vm-debugger-boundary-{}-{}.toml",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::write(&configuration, boundary_profile(profile, split)).unwrap();
+            let configuration =
+                write_temporary_profile("vm-debugger-boundary", &boundary_profile(profile, split));
             for (kind, expected) in [(0, "swbreak:;"), (1, "hwbreak:;")] {
                 let mut session = Session::new_with_image(
                     &boundary_elf(profile),
@@ -410,14 +393,9 @@ fn elapsed_profile(profile: &str) -> String {
 fn inferred_clocks_pause_in_the_debugger_and_wfi_remains_interruptible() {
     let program = [0x1050_0073_u32.to_le_bytes(), 0xffdf_f06f_u32.to_le_bytes()].concat();
     for profile in ["cheriot", "rv32e", "rv32imc"] {
-        let configuration = std::env::temp_dir().join(format!(
-            "cheriot-host-clock-{}-{}.toml",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
         let text = elapsed_profile(profile)
             .replace("[[timer64]]\nname = \"timer0\"\nbase = 0x02000000\n", "");
-        fs::write(&configuration, text).unwrap();
+        let configuration = write_temporary_profile("cheriot-host-clock", &text);
         let mut session =
             Session::new_with_arguments(&program, "0", configuration.to_str().unwrap(), &[], false);
         session.query("qSupported:swbreak+;hwbreak+");
@@ -619,15 +597,10 @@ fn negotiated_memory_reads_respect_the_inspection_budget() {
 fn one_hertz_wfi_remains_interruptible_through_the_debugger() {
     let program = [0x1050_0073_u32.to_le_bytes(), 0xffdf_f06f_u32.to_le_bytes()].concat();
     for profile in ["cheriot", "rv32e", "rv32imc"] {
-        let configuration = std::env::temp_dir().join(format!(
-            "cheriot-slow-clock-{}-{}.toml",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
         let text = elapsed_profile(profile)
             .replace("timer_hz = 2000", "timer_hz = 1")
             .replace("[[timer64]]\nname = \"timer0\"\nbase = 0x02000000\n", "");
-        fs::write(&configuration, text).unwrap();
+        let configuration = write_temporary_profile("cheriot-slow-clock", &text);
         let mut session =
             Session::new_with_arguments(&program, "0", configuration.to_str().unwrap(), &[], false);
         session.query("qSupported:swbreak+;hwbreak+");
@@ -640,6 +613,16 @@ fn one_hertz_wfi_remains_interruptible_through_the_debugger() {
         drop(session);
         fs::remove_file(configuration).unwrap();
     }
+}
+
+fn write_temporary_profile(prefix: &str, text: &str) -> PathBuf {
+    let path = std::env::temp_dir().join(format!(
+        "{prefix}-{}-{}.toml",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::write(&path, text).unwrap();
+    path
 }
 
 #[test]

@@ -73,8 +73,29 @@ pub(crate) fn execute_cli() -> Result<(), EmulatorError> {
     if completion.is_some() {
         configuration.completion = completion;
     }
+    let is_cheriot = configuration.is_cheriot();
+    let trap_policy = trap_policy.unwrap_or(if is_cheriot {
+        TrapPolicy::Vector
+    } else {
+        TrapPolicy::Stop
+    });
+    let presentation = output.unwrap_or(if is_cheriot {
+        OutputPresentation::Compatibility
+    } else {
+        OutputPresentation::Labelled
+    });
+    let run_options = |uart| RunOptions {
+        uart,
+        breakpoint,
+        memory_dump,
+        presentation,
+        registers,
+        steps,
+        trace,
+        trap_policy,
+    };
     let firmware = read_file(firmware_path, MAX_FIRMWARE_BYTES, "firmware")?;
-    if configuration.is_cheriot() {
+    if is_cheriot {
         let mut system = if firmware_is_elf {
             configuration.build_cheriot(&firmware)?
         } else {
@@ -86,19 +107,7 @@ pub(crate) fn execute_cli() -> Result<(), EmulatorError> {
         if let Some(address) = gdb {
             return run::debugger::run_cheriot(system, address, steps, gdb_raw_output, uart);
         }
-        let (system, _) = run::cheriot::run_with_options(
-            system,
-            RunOptions {
-                uart,
-                breakpoint,
-                memory_dump,
-                presentation: output.unwrap_or(OutputPresentation::Compatibility),
-                registers,
-                steps,
-                trace,
-                trap_policy: trap_policy.unwrap_or(TrapPolicy::Vector),
-            },
-        )?;
+        let (system, _) = run::cheriot::run_with_options(system, run_options(uart))?;
         if let Some(path) = checkpoint {
             let mut file = std::io::BufWriter::new(std::fs::File::create(path)?);
             system.write_checkpoint(&mut file)?;
@@ -111,7 +120,7 @@ pub(crate) fn execute_cli() -> Result<(), EmulatorError> {
     } else {
         configuration.build_raw(raw_address, &firmware)?
     };
-    computer.trap_policy = trap_policy.unwrap_or(TrapPolicy::Stop);
+    computer.trap_policy = trap_policy;
     let uart = crate::cli::host_bindings::connect(&mut computer.bus, host, gdb.is_some())?;
     #[cfg(all(feature = "gdb", target_os = "linux"))]
     if let Some(address) = gdb {
@@ -119,19 +128,7 @@ pub(crate) fn execute_cli() -> Result<(), EmulatorError> {
     }
     #[cfg(not(all(feature = "gdb", target_os = "linux")))]
     let _ = (gdb, gdb_raw_output);
-    let (computer, _) = run::rv32::run_with_options(
-        computer,
-        RunOptions {
-            uart,
-            steps,
-            breakpoint,
-            trace,
-            registers,
-            memory_dump,
-            presentation: output.unwrap_or(OutputPresentation::Labelled),
-            trap_policy: trap_policy.unwrap_or(TrapPolicy::Stop),
-        },
-    )?;
+    let (computer, _) = run::rv32::run_with_options(computer, run_options(uart))?;
     if let Some(path) = checkpoint {
         let mut file = std::io::BufWriter::new(std::fs::File::create(path)?);
         computer.write_checkpoint(&mut file)?;

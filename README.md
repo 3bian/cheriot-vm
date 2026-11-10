@@ -1,13 +1,11 @@
 # CHERIoT Virtual Machine
 
-CHERIoT and RV32 RISC-V firmware with simulated memory and devices.
+## Command Line Options
 
-## Command-Line Options
-
-Run the following command for the current list:
+After installation, run the following command for the current list:
 
 ```sh
-./target/release/cheriot-vm --help
+cheriot-vm --help
 ```
 
 ```text
@@ -101,107 +99,161 @@ Options:
 
 Use --profile with either --elf or --raw. Addresses and counts accept decimal or 0x hexadecimal values. Repeat connection options to connect different devices. Other value-taking options can only be supplied once; repeated --trace switches are harmless. Checkpoints are comparison snapshots, *not restore images*.
 
+## About
+
+CHERIoT and RV32 RISC-V firmware with simulated memory and devices.
+
 ## Build and Run
 
-Install Git, then install Rust and Cargo with [rustup](https://github.com/rust-lang/rustup). Clone the VM into a new working folder and build it:
+### Developer Environment
 
-```sh
-git clone --depth 1 https://github.com/3bian-adam/cheriot-vm ./cheriot-vm
-export CHERIOT_VM="$(cd ./cheriot-vm && pwd)"
-cd "$CHERIOT_VM"
-cargo build --locked --release
+This fresh-install recipe is for Debian or Ubuntu and uses the default Rustup and Cargo locations. It needs network access, sudo privileges, and substantial time and disk space. The host packages must provide CMake 3.20 or newer, Python 3.8 or newer, and LLD 11 or newer.
+
+Place this checkout at $HOME/cheriot-vm before running these commands. If you already have an installation or checkout at one of the other locations, skip its installation or clone command. Initialize the RTOS submodules in an existing checkout. Copying the VM overlay can overwrite matching RTOS files.
+
+```bash
+set -euo pipefail
+
+export CHERIOT_LLVM="$HOME/cheriot-llvm"
+export CHERIOT_RTOS="$HOME/cheriot-rtos"
+export CHERIOT_TOOLS="$HOME/cheriot-tools"
+
+# Install host build tools.
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  build-essential ca-certificates clang cmake curl git lld python3
+
+# Clone the RTOS.
+git clone --recurse-submodules \
+  https://github.com/CHERIoT-Platform/cheriot-rtos.git "$CHERIOT_RTOS"
+
+# Clone the LLVM sources needed for the low-memory build.
+git -c checkout.workers=1 -c index.threads=1 -c pack.threads=1 \
+  clone --branch cheriot --depth 1 --filter=blob:none --single-branch --sparse \
+  https://github.com/CHERIoT-Platform/llvm-project.git "$CHERIOT_LLVM"
+
+git -C "$CHERIOT_LLVM" \
+  -c checkout.workers=1 -c index.threads=1 -c pack.threads=1 \
+  sparse-checkout set --cone clang cmake libc libunwind lld llvm third-party
+
+# Install Rust and load its environment.
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+  sh -s -- -y --profile minimal
+. "$HOME/.cargo/env"
+
+# Build and install the VM with debugger support.
+cd "$HOME/cheriot-vm"
+cargo install --locked --path . --features gdb --jobs 1
+
+# Build the CHERIoT compiler with one build job and one linker thread.
+cmake -S "$CHERIOT_LLVM/llvm" \
+  -B "$CHERIOT_LLVM/build" \
+  -G "Unix Makefiles" \
+  -DCLANG_ENABLE_CIR=OFF \
+  -DCLANG_ENABLE_OBJC_REWRITER=OFF \
+  -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+  -DCMAKE_CXX_FLAGS="" \
+  -DCMAKE_CXX_FLAGS_RELEASE="-O1 -DNDEBUG" \
+  -DCMAKE_C_COMPILER=/usr/bin/clang \
+  -DCMAKE_C_FLAGS="" \
+  -DCMAKE_C_FLAGS_RELEASE="-O1 -DNDEBUG" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld -Wl,--threads=1" \
+  -DCMAKE_INSTALL_PREFIX="$CHERIOT_TOOLS" \
+  -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld -Wl,--threads=1" \
+  -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=lld -Wl,--threads=1" \
+  -DLLVM_DISTRIBUTION_COMPONENTS="clang;clang-resource-headers;lld;llvm-objdump;llvm-objcopy;llvm-strip" \
+  -DLLVM_ENABLE_ASSERTIONS=OFF \
+  -DLLVM_ENABLE_LTO=OFF \
+  -DLLVM_ENABLE_PROJECTS="clang;lld" \
+  -DLLVM_ENABLE_RUNTIMES="" \
+  -DLLVM_ENABLE_THREADS=OFF \
+  -DLLVM_ENABLE_UNWIND_TABLES=OFF \
+  -DLLVM_INCLUDE_BENCHMARKS=OFF \
+  -DLLVM_INCLUDE_DOCS=OFF \
+  -DLLVM_INCLUDE_EXAMPLES=OFF \
+  -DLLVM_INCLUDE_RUNTIMES=OFF \
+  -DLLVM_INCLUDE_TESTS=OFF \
+  -DLLVM_TARGETS_TO_BUILD=RISCV \
+  -DLLVM_USE_LINKER=lld
+
+cmake --build "$CHERIOT_LLVM/build" \
+  --parallel 1 --target install-distribution
+
+"$CHERIOT_TOOLS/bin/clang" --version
+
+# Add the VM board and drivers to the RTOS checkout.
+cp -R "$HOME/cheriot-vm/integrations/cheriot-rtos/." "$CHERIOT_RTOS/"
 ```
 
-The rust-toolchain.toml file selects the required toolchain. Run the bundled guest from the VM folder:
+The installed VM is available as cheriot-vm through Cargo's bin directory.
+Examples that use ./target/release/cheriot-vm need a local release build; use
+the installed command if you only ran the developer setup. The LLVM installation
+is at CHERIOT_TOOLS; xmake's --sdk takes that directory. The sparse checkout
+retains libc, libunwind and third-party because LLVM needs their headers.
+
+### Optional: Run the Bundled ELF
+
+The repository includes a hello-world ELF, so it can run without building a
+new guest. After installing the VM, run it from the VM crate directory:
 
 ```sh
-./target/release/cheriot-vm \
+cd "$HOME/cheriot-vm"
+cheriot-vm \
   --elf examples/hello_world/hello_world.elf \
-  --profile profiles/cheriot.toml \
-  --steps 1000000
+  --profile profiles/cheriot.toml
 ```
 
-The program prints Hello world compartment: Hello world and tells the VM when it has finished. The included ELF matches profiles/cheriot.toml and has debug symbols.
-
-To build the VM with guest debugger support, run this in the VM folder:
-
-```sh
-cargo build --locked --release --features gdb
-```
-
-Cargo builds the VM itself. Build your guest program separately with the compiler and build system for its target.
+The program prints Hello world compartment: Hello world and reports guest
+completion. The bundled ELF matches the CHERIoT profile and contains debug
+symbols. To build the VM independently with debugger support, run
+`cargo build --locked --release --features gdb` in the VM crate directory.
 
 ### Build the CHERIoT Examples
 
-The ELF is included, so you only need these steps if you want to rebuild it. You will need xmake, CMake, Ninja and a C/C++ build compiler. The following commands place the toolchain and RTOS alongside the VM checkout.
-
-To build the CHERIoT LLVM toolchain from source, return to the working folder containing the VM checkout. The build needs substantial disk space and time:
-
-```sh
-cd "$CHERIOT_VM/.."
-git clone --branch cheriot --depth 1 --single-branch https://github.com/CHERIoT-Platform/llvm-project.git ./cheriot-llvm
-cmake -S ./cheriot-llvm/llvm -B ./cheriot-llvm/build -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DLLVM_ENABLE_PROJECTS="clang;clang-tools-extra;lld" \
-  -DLLVM_TARGETS_TO_BUILD=RISCV \
-  -DLLVM_ENABLE_UNWIND_TABLES=OFF \
-  -DLLVM_DISTRIBUTION_COMPONENTS="clang;clangd;lld;llvm-objdump;llvm-objcopy" \
-  -DCMAKE_INSTALL_PREFIX="$PWD/cheriot-llvm/build/cheriot-tools"
-cmake --build ./cheriot-llvm/build --target install-distribution
-export CHERIOT_TOOLCHAIN="$(cd ./cheriot-llvm/build/cheriot-tools && pwd)"
-```
-
-If you already have the CHERIoT LLVM tools, set CHERIOT_TOOLCHAIN to their installation directory instead:
+This optional xmake workflow rebuilds the VM's hello-world source. Install
+xmake separately and use the RTOS and toolchain prepared above:
 
 ```sh
-export CHERIOT_TOOLCHAIN=/absolute/path/to/cheriot-tools
-```
-
-Next, prepare the CHERIoT RTOS checkout and the VM's board support.
-
-From the same working folder, create the RTOS checkout and install the VM's board support:
-
-```sh
-cd "$CHERIOT_VM/.."
-git clone --recursive https://github.com/CHERIoT-Platform/cheriot-rtos.git ./cheriot-rtos
-export CHERIOT_RTOS="$(cd ./cheriot-rtos && pwd)"
-cp -a "$CHERIOT_VM/integrations/cheriot-rtos/." "$CHERIOT_RTOS/"
-```
-
-The copy installs the VM's board and drivers into that RTOS checkout. If you already have a checkout, set CHERIOT_RTOS to its absolute path instead.
-
-CHERIOT_TOOLCHAIN is the LLVM installation directory passed to --sdk; it is separate from CHERIOT_RTOS. Build and run the example:
-
-```sh
-cd "$CHERIOT_VM/examples/hello_world"
-xmake f --clean --board=cheriot-vm --sdk="$CHERIOT_TOOLCHAIN" -m debug -y
-xmake
-cd "$CHERIOT_VM"
-./target/release/cheriot-vm \
+cd "$HOME/cheriot-vm/examples/hello_world"
+xmake f --clean --board=cheriot-vm --sdk="$CHERIOT_TOOLS" -m debug -y
+xmake -j 1
+cd "$HOME/cheriot-vm"
+cheriot-vm \
   --profile profiles/cheriot.toml \
-  --elf examples/hello_world/build/cheriot/cheriot/debug/hello_world.elf \
-  --steps 1000000
+  --elf examples/hello_world/build/cheriot/cheriot/debug/hello_world.elf
 ```
 
-The build produces hello_world.elf under examples/hello_world/build/cheriot/cheriot/debug/. When debugging it, select that file so the symbols match the program running in the VM.
+The ELF has the same name under `examples/hello_world/build/cheriot/cheriot/debug/`.
+Select the matching file and symbols when debugging it.
 
 ### Build the RTOS Test Suite
 
-After preparing the RTOS checkout and toolchain above, build its tests for the VM board:
+With xmake installed, build and run the RTOS tests for the VM board:
 
 ```sh
 cd "$CHERIOT_RTOS/tests"
-xmake f --clean --board=cheriot-vm --sdk="$CHERIOT_TOOLCHAIN" -m release -y
-xmake
-cd "$CHERIOT_VM"
-./target/release/cheriot-vm \
+xmake f --clean --board=cheriot-vm --sdk="$CHERIOT_TOOLS" -m release -y
+xmake -j 1
+cd "$HOME/cheriot-vm"
+cheriot-vm \
   --profile profiles/cheriot.toml \
   --elf "$CHERIOT_RTOS/tests/build/cheriot/cheriot/release/test-suite"
 ```
 
-For elapsed-time execution, use the same VM-board build with the custom elapsed-time profile described under Profiles below. *Rebuild existing Sail-board firmware with --board=cheriot-vm first.* Its cycle-counter time helper does not match the elapsed-time scheduler clock and can cause very long sleeps before the exit request is reached.
+For elapsed-time execution, use the same VM-board build with the custom
+elapsed-time profile described under Profiles below. Rebuild existing
+Sail-board firmware for `cheriot-vm` first: its cycle-counter time helper
+does not match the elapsed-time scheduler clock and can delay completion.
 
 ### ELF and Raw Firmware
+
+The remaining VM examples use the VM crate as their working directory:
+
+```sh
+cd "$HOME/cheriot-vm"
+```
 
 An ELF file contains the firmware along with information about where to load it and where execution starts. It can also contain symbols and source information for a debugger. The bundled Hello World program is an ELF file.
 
@@ -440,6 +492,8 @@ To capture output without enabling host input:
 ```
 
 An output file is *created or overwritten*. Use different input and output files. A dedicated output path receives only the selected UART’s bytes, without labels or escaping. VM diagnostics and HTIF output keep their normal destinations, including when a UART is named tohost. Use /dev/null as the output path to discard that UART's output.
+
+Dedicated UART outputs must refer to different files, including through symbolic or hard links, and must not name the file receiving stdout. To combine UART output, direct the devices to stdout instead.
 
 Output is buffered and flushed during execution at roughly 16 ms intervals and when execution stops. This is not a real-time guarantee. A stalled consumer or host device can delay or fail output; a guest step limit does not impose a host wall-clock deadline.
 

@@ -11,6 +11,7 @@ use cheriot_vm::host::uart::input::UartInput;
 use cheriot_vm::host::uart::port::UartPort;
 use cheriot_vm::EmulatorError;
 
+use crate::cli::uart::is_stdout_path;
 use crate::cli::uart::options::UartOptions;
 use crate::cli::uart::output_binding::UartOutputBinding;
 
@@ -47,12 +48,11 @@ impl UartConnections {
                     "a host UART input path may only be bound once".into(),
                 ));
             }
-            if option.output.as_ref().is_some_and(|path| {
-                !matches!(
-                    path.as_str(),
-                    "/dev/stdout" | "/dev/fd/1" | "/proc/self/fd/1"
-                ) && !outputs.insert(path.clone())
-            }) {
+            if option
+                .output
+                .as_ref()
+                .is_some_and(|path| !is_stdout_path(path) && !outputs.insert(path.clone()))
+            {
                 return Err(EmulatorError::Configuration("a host UART output path may only be bound once; use stdout for combined output".into()));
             }
             bindings.push((device, option));
@@ -66,15 +66,12 @@ impl UartConnections {
                     use std::os::unix::fs::{FileTypeExt, MetadataExt};
                     let mut ports = HashSet::new();
                     for path in option.input.iter().chain(option.output.iter()) {
-                        if matches!(
-                            path.as_str(),
-                            "/dev/stdin"
-                                | "/dev/stdout"
-                                | "/dev/fd/0"
-                                | "/dev/fd/1"
-                                | "/proc/self/fd/0"
-                                | "/proc/self/fd/1"
-                        ) {
+                        if is_stdout_path(path)
+                            || matches!(
+                                path.as_str(),
+                                "/dev/stdin" | "/dev/fd/0" | "/proc/self/fd/0"
+                            )
+                        {
                             continue;
                         }
                         if let Ok(metadata) = std::fs::metadata(path) {
@@ -106,6 +103,14 @@ impl UartConnections {
                 }
             }
         }
+        #[cfg(unix)]
+        let mut output_files = HashSet::new();
+        #[cfg(target_os = "linux")]
+        if let Ok(stdout) = nix::sys::stat::fstat(std::io::stdout()) {
+            if stdout.st_mode & nix::libc::S_IFMT == nix::libc::S_IFREG {
+                output_files.insert((stdout.st_dev, stdout.st_ino));
+            }
+        }
         for (device, option) in bindings {
             if let Some(path) = option.input {
                 connections
@@ -114,8 +119,21 @@ impl UartConnections {
             }
             if let Some(path) = option.output {
                 if let Some(output) = UartOutputBinding::open(device, &path, debugger)? {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::MetadataExt;
+                        let metadata = output.file.metadata()?;
+                        if !output_files.insert((metadata.dev(), metadata.ino())) {
+                            return Err(EmulatorError::Configuration("a host UART output destination may only be bound once; use stdout for combined output".into()));
+                        }
+                    }
                     connections.outputs.push(output);
                 }
+            }
+        }
+        if !debugger {
+            for output in &connections.outputs {
+                output.truncate()?;
             }
         }
         Ok(connections)

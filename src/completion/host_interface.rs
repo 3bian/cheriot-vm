@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 use crate::bus::Bus;
+use crate::devices::output_capture::OutputCapture;
 use crate::error::EmulatorError;
 
 pub struct HostInterface {
@@ -9,7 +10,7 @@ pub struct HostInterface {
     command_written: bool,
     completed: Option<u64>,
     payload_writes: u8,
-    terminal: Vec<u8>,
+    terminal: OutputCapture,
     value: u64,
 }
 
@@ -20,7 +21,7 @@ impl HostInterface {
             command_written: false,
             completed: None,
             payload_writes: 0,
-            terminal: Vec::new(),
+            terminal: OutputCapture::default(),
             value: 0,
         }
     }
@@ -43,8 +44,7 @@ impl HostInterface {
     }
 
     pub fn drain_transmitted(&mut self, output: &mut Vec<u8>) {
-        output.extend_from_slice(&self.terminal);
-        self.terminal.clear();
+        self.terminal.drain_into(output);
     }
 
     pub fn observe_store(
@@ -95,13 +95,11 @@ impl HostInterface {
                 }
                 0 => (),
                 1 if (value >> 48) & 255 == 1 => {
-                    if self.terminal.len() >= 65536 {
+                    if !self.terminal.push(value as u8) {
                         return Err(EmulatorError::Firmware(
                             "HTIF terminal capture is full".into(),
                         ));
                     }
-
-                    self.terminal.push(value as u8);
                     bus.write(self.address, 4, 0)?;
                     bus.write(high_address, 4, 0)?;
                     self.command_written = false;
@@ -121,6 +119,6 @@ impl HostInterface {
     }
 
     pub fn take_transmitted(&mut self) -> Vec<u8> {
-        std::mem::take(&mut self.terminal)
+        self.terminal.take()
     }
 }

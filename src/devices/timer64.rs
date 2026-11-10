@@ -10,6 +10,7 @@ pub struct Timer64 {
     compare_value: u64,
     software_interrupt_pending: bool,
     time: u64,
+    time_written: bool,
     timer_interrupt_pending: bool,
 }
 
@@ -19,6 +20,7 @@ impl Default for Timer64 {
             compare_value: 0,
             software_interrupt_pending: false,
             time: 0,
+            time_written: false,
             timer_interrupt_pending: true,
         }
     }
@@ -27,6 +29,15 @@ impl Default for Timer64 {
 impl Timer64 {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn set_time(&mut self, time: u64) {
+        self.time = time;
+        self.timer_interrupt_pending = self.time >= self.compare_value;
+    }
+
+    pub(crate) fn take_written_time(&mut self) -> Option<u64> {
+        std::mem::take(&mut self.time_written).then_some(self.time)
     }
 }
 
@@ -94,6 +105,14 @@ impl Device for Timer64 {
             }
             0x4004 => {
                 self.compare_value = (self.compare_value & 0xffff_ffff) | (u64::from(value) << 32)
+            }
+            0xbff8 => {
+                self.time = (self.time & 0xffff_ffff_0000_0000) | u64::from(value);
+                self.time_written = true;
+            }
+            0xbffc => {
+                self.time = (self.time & 0xffff_ffff) | (u64::from(value) << 32);
+                self.time_written = true;
             }
             _ => {
                 return Err(EmulatorError::Bus {

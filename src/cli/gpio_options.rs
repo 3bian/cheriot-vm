@@ -4,7 +4,7 @@
 use cheriot_vm::host::gpio::settings::GpioSettings;
 use cheriot_vm::EmulatorError;
 
-use super::{device_settings, options::parse_unsigned};
+use super::{device_settings, options::parse_u32};
 
 pub(crate) struct GpioOptions {
     pub device: Option<String>,
@@ -27,11 +27,7 @@ impl GpioOptions {
         };
         let lines = lines
             .split('+')
-            .map(|value| {
-                u32::try_from(parse_unsigned(value)?).map_err(|_| {
-                    EmulatorError::Configuration("GPIO line offset exceeds 32 bits".into())
-                })
-            })
+            .map(|value| parse_u32(value, "GPIO line offset exceeds 32 bits"))
             .collect::<Result<_, _>>()?;
         Ok(Self {
             device: settings.get("device").map(|value| (*value).to_owned()),

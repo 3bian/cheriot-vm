@@ -68,6 +68,79 @@ fn host_i2c_buffers_writes_and_preserves_write_read_repeated_start() {
 }
 
 #[test]
+fn host_i2c_reuses_bursts_without_stale_bytes_or_extra_transfers() {
+    use std::cell::RefCell;
+    use std::io;
+    use std::rc::Rc;
+
+    type Calls = Rc<RefCell<Vec<(Vec<u8>, Vec<u8>)>>>;
+    struct Transport(Calls);
+    impl I2cTransport for Transport {
+        fn transfer(&mut self, _: u8, write: &[u8], read: &mut [u8]) -> io::Result<()> {
+            let mut calls = self.0.borrow_mut();
+            calls.push((write.to_vec(), read.to_vec()));
+            let sequence = calls.len() as u8;
+            for (index, byte) in read.iter_mut().enumerate() {
+                *byte = sequence * 16 + index as u8;
+            }
+            Ok(())
+        }
+    }
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let mut bus = I2c::with_host(Box::new(Transport(calls.clone())));
+    bus.write(0, 4, 0x50).unwrap();
+    for (sequence, length) in [4_u32, 1, 6].into_iter().enumerate() {
+        bus.write(16, 4, (length - 1) << 16).unwrap();
+        bus.write(4, 4, 0x40 + sequence as u32).unwrap();
+        bus.write(8, 4, 1).unwrap();
+        bus.write(8, 4, 4).unwrap();
+        for index in 0..length {
+            bus.write(8, 4, 2).unwrap();
+            assert_eq!(
+                bus.read(4, 4).unwrap(),
+                ((sequence + 1) * 16) as u32 + index
+            );
+        }
+        bus.write(8, 4, 3).unwrap();
+        assert_eq!(calls.borrow().len(), sequence + 1);
+    }
+    assert_eq!(
+        *calls.borrow(),
+        [
+            (vec![0x40], vec![0; 4]),
+            (vec![0x41], vec![0; 1]),
+            (vec![0x42], vec![0; 6]),
+        ]
+    );
+}
+
+#[test]
+fn host_i2c_failed_read_latches_error_and_does_not_retry() {
+    use std::cell::RefCell;
+    use std::io;
+    use std::rc::Rc;
+
+    struct Failing(Rc<RefCell<Vec<Vec<u8>>>>);
+    impl I2cTransport for Failing {
+        fn transfer(&mut self, _: u8, write: &[u8], read: &mut [u8]) -> io::Result<()> {
+            self.0.borrow_mut().push(write.to_vec());
+            read.fill(0xff);
+            Err(io::Error::other("injected read failure"))
+        }
+    }
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let mut bus = I2c::with_host(Box::new(Failing(calls.clone())));
+    bus.write(0, 4, 0x50).unwrap();
+    bus.write(4, 4, 0x42).unwrap();
+    bus.write(8, 4, 1).unwrap();
+    bus.write(8, 4, 4).unwrap();
+    assert!(bus.write(8, 4, 2).is_err());
+    assert!(bus.host_error().unwrap().contains("injected read failure"));
+    assert!(bus.write(8, 4, 3).is_err());
+    assert_eq!(*calls.borrow(), [vec![0x42]]);
+}
+
+#[test]
 fn host_i2c_rejects_invalid_accesses_and_latches_transport_failures() {
     use std::cell::Cell;
     use std::io;

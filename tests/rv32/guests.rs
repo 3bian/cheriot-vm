@@ -69,24 +69,13 @@ fn disabled_m_extension_traps() {
 #[test]
 fn elf_loader_checks_architecture_and_zero_fills_bss() {
     let mut image = vec![0_u8; 132];
-    image[0..4].copy_from_slice(b"\x7fELF");
-    image[4] = 1;
-    image[5] = 1;
-    image[6] = 1;
-    image[16..18].copy_from_slice(&2_u16.to_le_bytes());
-    image[18..20].copy_from_slice(&243_u16.to_le_bytes());
-    image[20..24].copy_from_slice(&1_u32.to_le_bytes());
-    image[28..32].copy_from_slice(&52_u32.to_le_bytes());
-    image[40..42].copy_from_slice(&52_u16.to_le_bytes());
-    image[42..44].copy_from_slice(&32_u16.to_le_bytes());
-    image[44..46].copy_from_slice(&1_u16.to_le_bytes());
+    crate::firmware_elf::write_elf32_header(&mut image, BASE, 0, 1);
     let program_header = 52;
     image[program_header..program_header + 4].copy_from_slice(&1_u32.to_le_bytes());
     image[program_header + 4..program_header + 8].copy_from_slice(&128_u32.to_le_bytes());
     image[program_header + 16..program_header + 20].copy_from_slice(&4_u32.to_le_bytes());
     image[program_header + 20..program_header + 24].copy_from_slice(&8_u32.to_le_bytes());
     image[program_header + 24..program_header + 28].copy_from_slice(&5_u32.to_le_bytes());
-    image[24..28].copy_from_slice(&BASE.to_le_bytes());
     image[60..64].copy_from_slice(&BASE.to_le_bytes());
     image[64..68].copy_from_slice(&BASE.to_le_bytes());
     image[128..132].copy_from_slice(&0x00100073_u32.to_le_bytes());

@@ -4,7 +4,6 @@
 use serde::Deserialize;
 
 use crate::bus::Bus;
-use crate::devices::InterruptLine;
 use crate::processor::MachineRegisters;
 
 mod host_clock;
@@ -41,10 +40,14 @@ pub(crate) fn validate_timer_hz(hz: u32) -> Result<(), crate::EmulatorError> {
 
 fn refresh_interrupts(bus: &mut Bus, registers: &mut MachineRegisters) {
     bus.refresh_interrupts();
-    registers.interrupt_pending = (registers.interrupt_pending & 0x222)
-        | (u32::from(bus.interrupt_pending(InterruptLine::MachineExternal)) << 11)
-        | (u32::from(bus.interrupt_pending(InterruptLine::MachineSoftware)) << 3)
-        | (u32::from(bus.interrupt_pending(InterruptLine::MachineTimer)) << 7);
+    registers.interrupt_pending =
+        (registers.interrupt_pending & 0x222) | bus.machine_interrupt_bits();
+}
+
+pub(crate) fn synchronize_machine_time(bus: &mut Bus, registers: &mut MachineRegisters) {
+    if let Some(time) = bus.take_machine_time() {
+        registers.time = time;
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
@@ -71,6 +74,7 @@ impl TimingPolicy {
         inhibit_before: u32,
         writes_cycle: bool,
     ) {
+        synchronize_machine_time(bus, registers);
         let tick = clock.advance();
         if self == Self::PerStep && !tick {
             return;

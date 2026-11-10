@@ -150,6 +150,91 @@ base = 0x10000000
 }
 
 #[test]
+fn csr_forms_preserve_value_and_encoded_write_intent_on_both_engines() {
+    for profile in ["rv32imc", "cheriot"] {
+        for (function, source, register_value, expected) in [
+            (1, 1, 0x3c, 0x3c),
+            (2, 1, 0x3c, 0xbd),
+            (3, 1, 0x3c, 0x81),
+            (5, 1, 0, 1),
+            (6, 1, 0, 0xa5),
+            (7, 1, 0, 0xa4),
+            (1, 0, 0, 0),
+            (2, 0, 0, 0xa5),
+            (3, 0, 0, 0xa5),
+            (5, 0, 0, 0),
+            (6, 0, 0, 0xa5),
+            (7, 0, 0, 0xa5),
+            (2, 1, 0, 0xa5),
+            (3, 1, 0, 0xa5),
+        ] {
+            let word = (0x340 << 20) | (source << 15) | (function << 12) | (2 << 7) | 0x73;
+            let mut machine = machine(profile, TimingPolicy::PerStep, &[word], false);
+            match &mut machine {
+                Engine::Cheriot(system) => {
+                    system.computer.processor.machine_registers.scratch = 0xa5
+                }
+                Engine::Integer(computer) => computer.processor.machine_registers.scratch = 0xa5,
+            }
+            machine.set_register(1, register_value, false);
+            assert_eq!(machine.step(), (false, None), "{profile}/{word:#010x}");
+            assert_eq!(machine.read(2), 0xa5, "{profile}/{word:#010x}");
+            let scratch = match &machine {
+                Engine::Cheriot(system) => system.computer.processor.machine_registers.scratch,
+                Engine::Integer(computer) => computer.processor.machine_registers.scratch,
+            };
+            assert_eq!(scratch, expected, "{profile}/{word:#010x}");
+        }
+
+        for (function, source, traps) in [
+            (1, 0, true),
+            (2, 0, false),
+            (3, 0, false),
+            (5, 0, true),
+            (6, 0, false),
+            (7, 0, false),
+            (2, 1, true),
+            (3, 1, true),
+        ] {
+            let word = (0xf11 << 20) | (source << 15) | (function << 12) | (2 << 7) | 0x73;
+            let mut machine = machine(profile, TimingPolicy::PerStep, &[word], false);
+            machine.set_register(1, 0, false);
+            assert_eq!(machine.step(), (traps, None), "{profile}/{word:#010x}");
+        }
+    }
+}
+
+#[test]
+fn faulting_counter_writes_do_not_suppress_cycle_increment() {
+    use cheriot_vm::cheriot::permissions;
+
+    for profile in ["rv32e", "cheriot"] {
+        let source = if profile == "rv32e" { 16 } else { 1 };
+        let word = (0xb00 << 20) | (source << 15) | (1 << 12) | (2 << 7) | 0x73;
+        let mut machine = machine(profile, TimingPolicy::PerStep, &[word], false);
+        if let Engine::Cheriot(system) = &mut machine {
+            system.computer.processor.pcc = system
+                .computer
+                .processor
+                .pcc
+                .restrict_permissions(0xfff & !permissions::SYSTEM_REGISTERS);
+        }
+        assert_eq!(machine.step(), (true, None), "{profile}");
+        let (cycle, retired) = match &machine {
+            Engine::Cheriot(system) => (
+                system.computer.processor.machine_registers.cycle,
+                system.computer.processor.machine_registers.retired,
+            ),
+            Engine::Integer(computer) => (
+                computer.processor.machine_registers.cycle,
+                computer.processor.machine_registers.retired,
+            ),
+        };
+        assert_eq!((cycle, retired), (1, 0), "{profile}");
+    }
+}
+
+#[test]
 fn all_profiles_and_timing_policies_count_attempts_fetches_retirements_and_ticks() {
     for profile in PROFILES {
         for timing in TIMINGS {
@@ -355,8 +440,41 @@ fn htif_rejects_invalid_locations_and_commands_and_bounds_terminal_capture() {
     }
     bus.write(0, 4, u32::from(b'Y')).unwrap();
     bus.write(4, 4, 0x0101_0000).unwrap();
-    assert!(interface.observe_store(&mut bus, 0, 8).is_err());
+    assert!(matches!(
+        interface.observe_store(&mut bus, 0, 8),
+        Err(cheriot_vm::EmulatorError::Firmware(message))
+            if message == "HTIF terminal capture is full"
+    ));
+    assert_eq!(bus.inspect(0, 4).unwrap(), u32::from(b'Y'));
+    assert_eq!(bus.inspect(4, 4).unwrap(), 0x0101_0000);
     assert_eq!(interface.take_transmitted(), vec![b'X'; 65536]);
+    assert!(interface.take_transmitted().is_empty());
+    assert_eq!(interface.observe_store(&mut bus, 0, 8).unwrap(), None);
+    assert_eq!(bus.inspect(0, 4).unwrap(), 0);
+    assert_eq!(bus.inspect(4, 4).unwrap(), 0);
+    assert_eq!(interface.take_transmitted(), b"Y");
+
+    for _ in 0..65536 {
+        bus.write(0, 4, u32::from(b'Z')).unwrap();
+        bus.write(4, 4, 0x0101_0000).unwrap();
+        assert_eq!(interface.observe_store(&mut bus, 0, 8).unwrap(), None);
+    }
+    bus.write(0, 4, u32::from(b'W')).unwrap();
+    bus.write(4, 4, 0x0101_0000).unwrap();
+    assert!(interface.observe_store(&mut bus, 0, 8).is_err());
+
+    let mut drained = vec![b'P'];
+    interface.drain_transmitted(&mut drained);
+    assert_eq!(drained[0], b'P');
+    assert_eq!(&drained[1..], vec![b'Z'; 65536]);
+    assert!(interface.take_transmitted().is_empty());
+
+    assert_eq!(interface.observe_store(&mut bus, 0, 8).unwrap(), None);
+    assert_eq!(bus.inspect(0, 4).unwrap(), 0);
+    assert_eq!(bus.inspect(4, 4).unwrap(), 0);
+    assert_eq!(interface.take_transmitted(), b"W");
+    interface.drain_transmitted(&mut drained);
+    assert_eq!(drained.len(), 65537);
 }
 
 #[test]
