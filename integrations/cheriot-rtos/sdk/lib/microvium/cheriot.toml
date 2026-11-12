@@ -1,0 +1,26 @@
+# Copyright Microsoft and CHERIoT Contributors.
+# SPDX-License-Identifier: MIT
+
+include = [
+    "../freestanding/cheriot.toml",
+    "../string/cheriot.toml",
+]
+
+[sdk_components.microvium]
+dependencies = [
+    "freestanding",
+    "string",
+]
+kind = "library"
+
+[sdk_components.microvium.build]
+c_flags = [
+    "-Wno-constant-logical-operand",
+]
+includes = [
+    "${sdk}/include/microvium",
+    "${sdk}/lib/microvium",
+]
+sources = [
+    "${sdk}/third_party/microvium/dist-c/microvium.c",
+]

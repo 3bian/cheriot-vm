@@ -1,0 +1,42 @@
+{
+  "name": "cheriot-debug",
+  "displayName": "CHERIoT Debug",
+  "description": "Debug CHERIoT firmware in the cheriot emulator",
+  "version": "0.1.0",
+  "publisher": "cheriot",
+  "license": "MIT",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Debuggers"],
+  "main": "./extension.js",
+  "activationEvents": ["onDebugResolve:cheriot"],
+  "contributes": {
+    "breakpoints": [{ "language": "c" }, { "language": "cpp" }, { "language": "riscv" }],
+    "debuggers": [
+      {
+        "type": "cheriot",
+        "label": "CHERIoT emulator",
+        "languages": ["c", "cpp"],
+        "configurationAttributes": {
+          "launch": {
+            "properties": {
+              "program": { "type": "string", "description": "Firmware ELF. Omit to use the project's built firmware." },
+              "profile": { "type": "string", "description": "Machine profile: a [profiles.NAME] table in cheriot.toml, or a file." },
+              "config": { "type": "string", "description": "Project configuration file; defaults to cheriot.toml." },
+              "build": { "type": "boolean", "description": "Build the project before debugging.", "default": false },
+              "cheriot": { "type": "string", "description": "Path to the cheriot executable.", "default": "cheriot" }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "cheriot",
+            "request": "launch",
+            "name": "Debug CHERIoT firmware",
+            "build": true,
+            "profile": "vm"
+          }
+        ]
+      }
+    ]
+  }
+}

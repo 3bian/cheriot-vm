@@ -1,0 +1,10 @@
+# Microsoft's CHERIoT Kudu SAFE simulator. It reads the memory images that the board's
+# microsoft_safe packaging writes into the build directory. Pair with the
+# kudu-safe-simulator board. CHERIOT_MSFT_SAFE_SIM may name the simulator.
+description = "CHERIoT Kudu SAFE simulator"
+
+[exec]
+command = [
+    "sh", "-c", "sim=$CHERIOT_MSFT_SAFE_SIM; [ -n \"$sim\" ] || sim=cheriot_kudu_safe_sim; cd \"$1\" && exec \"$sim\"",
+    "sh", "${build_dir}",
+]

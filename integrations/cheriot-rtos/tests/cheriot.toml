@@ -1,0 +1,365 @@
+# Copyright Microsoft and CHERIoT Contributors.
+# SPDX-License-Identifier: MIT
+
+name = "cheriot-test-suite"
+board = "sail"
+include = ["../sdk/cheriot.toml"]
+sdk = "../sdk"
+
+[services.test_runner]
+build.sources = [
+    "test-runner.cc",
+    { path = "test-version.cc", rtos_git_description = true },
+]
+kind = "compartment"
+
+[services.ccompile_test]
+build.sources = ["ccompile-test.c"]
+dependencies = [
+    "freertos-compile-semaphore-only",
+    "freertos-compile-mutex-only",
+    "freertos-compile-recursive-mutex-only",
+    "freertos-compile-all-options",
+]
+kind = "compartment"
+
+[libraries.freertos-compile-semaphore-only]
+build.defines = [
+    "CHERIOT_CUSTOM_DEFAULT_MALLOC_CAPABILITY",
+    "CHERIOT_EXPOSE_FREERTOS_SEMAPHORE",
+]
+build.sources = ["ccompile-freertos-test.c"]
+kind = "object"
+
+[libraries.freertos-compile-mutex-only]
+build.defines = [
+    "CHERIOT_CUSTOM_DEFAULT_MALLOC_CAPABILITY",
+    "CHERIOT_EXPOSE_FREERTOS_MUTEX",
+]
+build.sources = ["ccompile-freertos-test.c"]
+kind = "object"
+
+[libraries.freertos-compile-recursive-mutex-only]
+build.defines = [
+    "CHERIOT_CUSTOM_DEFAULT_MALLOC_CAPABILITY",
+    "CHERIOT_EXPOSE_FREERTOS_RECURSIVE_MUTEX",
+]
+build.sources = ["ccompile-freertos-test.c"]
+kind = "object"
+
+[libraries.freertos-compile-all-options]
+build.defines = [
+    "CHERIOT_CUSTOM_DEFAULT_MALLOC_CAPABILITY",
+    "CHERIOT_EXPOSE_FREERTOS_SEMAPHORE",
+    "CHERIOT_EXPOSE_FREERTOS_MUTEX",
+    "CHERIOT_EXPOSE_FREERTOS_RECURSIVE_MUTEX",
+]
+build.sources = ["ccompile-freertos-test.c"]
+kind = "object"
+
+[libraries.extra_compiles_test]
+build.sources = []
+dependencies = ["atomic_fixed"]
+kind = "group"
+
+[libraries.preflight_test]
+build.sources = []
+kind = "group"
+
+[libraries.global_constructors_test]
+build.sources = []
+kind = "group"
+
+[services.debug_cxx_test]
+build.sources = ["debug_cxx-test.cc"]
+kind = "compartment"
+
+[services.debug_c_test]
+build.sources = ["debug_c-test.c"]
+kind = "compartment"
+
+[services.mmio_test]
+build.sources = ["mmio-test.cc"]
+kind = "compartment"
+
+[services.unwind_cleanup_test]
+build.sources = ["unwind_cleanup-test.cc"]
+dependencies = ["unwind_error_handler"]
+kind = "compartment"
+
+[services.softfloat_test]
+build.sources = ["softfloat-test.cc"]
+dependencies = ["softfloat"]
+kind = "compartment"
+
+[services.stdio_test]
+build.sources = ["stdio-test.cc"]
+dependencies = ["stdio"]
+kind = "compartment"
+
+[services.bigdata_test]
+build.sources = ["bigdata-test.cc"]
+kind = "compartment"
+
+[services.static_sealing_inner]
+build.sources = ["static_sealing_inner.cc"]
+kind = "compartment"
+
+[services.static_sealing_test]
+build.sources = ["static_sealing-test.cc"]
+dependencies = ["static_sealing_inner"]
+kind = "compartment"
+
+[services.crash_recovery_inner]
+build.sources = ["crash_recovery_inner.cc"]
+kind = "compartment"
+
+[services.crash_recovery_outer]
+build.sources = ["crash_recovery_outer.cc"]
+kind = "compartment"
+
+[services.crash_recovery_test]
+build.sources = ["crash_recovery-test.cc"]
+dependencies = ["crash_recovery_inner", "crash_recovery_outer"]
+kind = "compartment"
+
+[services.compartment_calls_inner]
+build.sources = ["compartment_calls_inner.cc"]
+kind = "compartment"
+
+[services.compartment_calls_test]
+build.sources = ["compartment_calls-test.cc"]
+dependencies = ["compartment_calls_inner"]
+kind = "compartment"
+
+[services.check_pointer_test]
+build.sources = ["check_pointer-test.cc"]
+kind = "compartment"
+
+[services.misc_test]
+build = { shared_objects = { exampleK = 1024, test_word = 4 }, sources = ["misc-test.cc"] }
+dependencies = ["string", "strtol"]
+kind = "compartment"
+
+[services.stack_integrity_thread]
+build.sources = ["stack_integrity_thread.cc"]
+kind = "compartment"
+
+[services.stack_test]
+build.sources = ["stack-test.cc"]
+dependencies = ["stack_integrity_thread"]
+kind = "compartment"
+
+[services.thread_pool_test]
+build.sources = ["thread_pool-test.cc"]
+dependencies = ["cxxrt"]
+kind = "compartment"
+
+[services.queue_test]
+build.sources = ["queue-test.cc"]
+dependencies = ["message_queue"]
+kind = "compartment"
+
+[services.futex_test]
+build.sources = ["futex-test.cc"]
+kind = "compartment"
+
+[services.locks_test]
+build.sources = ["locks-test.cc"]
+dependencies = ["cxxrt"]
+kind = "compartment"
+
+[services.list_test]
+build.sources = ["list-test.cc"]
+kind = "compartment"
+
+[services.eventgroup_test]
+build.sources = ["eventgroup-test.cc"]
+dependencies = ["cxxrt", "event_group"]
+kind = "compartment"
+
+[services.multiwaiter_test]
+build.sources = ["multiwaiter-test.cc"]
+dependencies = ["cxxrt", "message_queue"]
+kind = "compartment"
+
+[services.allocator_test]
+build.sources = ["allocator-test.cc"]
+dependencies = ["cxxrt"]
+kind = "compartment"
+
+[services.bitpacks_test]
+build.sources = ["bitpacks-test.cc"]
+kind = "compartment"
+
+[services.time_test]
+build.sources = ["time-test.cc"]
+dependencies = ["time"]
+kind = "compartment"
+
+[test_firmware]
+most_tests = true
+runner = "test_runner"
+
+[[test_firmware.cases]]
+name = "ccompile"
+prototype = false
+run = false
+target = "ccompile_test"
+
+[[test_firmware.cases]]
+name = "extra_compiles"
+compartment = false
+prototype = false
+run = false
+target = "extra_compiles_test"
+
+[[test_firmware.cases]]
+name = "preflight"
+compartment = false
+prototype = false
+run = false
+target = "preflight_test"
+
+[[test_firmware.cases]]
+name = "debug_cxx"
+display_name = "Debug helpers (C++)"
+target = "debug_cxx_test"
+
+[[test_firmware.cases]]
+name = "debug_c"
+display_name = "Debug helpers (C)"
+target = "debug_c_test"
+
+[[test_firmware.cases]]
+name = "mmio"
+display_name = "MMIO"
+target = "mmio_test"
+
+[[test_firmware.cases]]
+name = "unwind_cleanup"
+display_name = "Unwind cleanup"
+target = "unwind_cleanup_test"
+
+[[test_firmware.cases]]
+name = "softfloat"
+target = "softfloat_test"
+
+[[test_firmware.cases]]
+name = "stdio"
+target = "stdio_test"
+
+[[test_firmware.cases]]
+name = "bigdata"
+conflicts = ["allocator"]
+include_in_most = false
+target = "bigdata_test"
+
+[[test_firmware.cases]]
+name = "static_sealing"
+display_name = "Static sealing"
+target = "static_sealing_test"
+
+[[test_firmware.cases]]
+name = "crash_recovery"
+display_name = "Crash recovery"
+target = "crash_recovery_test"
+
+[[test_firmware.cases]]
+name = "compartment_calls"
+target = "compartment_calls_test"
+
+[[test_firmware.cases]]
+name = "check_pointer"
+target = "check_pointer_test"
+
+[[test_firmware.cases]]
+name = "misc"
+target = "misc_test"
+
+[[test_firmware.cases]]
+name = "stack"
+display_name = "Switcher stack handling"
+target = "stack_test"
+
+[[test_firmware.cases]]
+name = "thread_pool"
+display_name = "Thread pool"
+target = "thread_pool_test"
+
+[[test_firmware.cases]]
+name = "global_constructors"
+absorbed_sources = ["global_constructors-test.cc"]
+compartment = false
+target = "global_constructors_test"
+
+[[test_firmware.cases]]
+name = "queue"
+display_name = "Queue"
+target = "queue_test"
+
+[[test_firmware.cases]]
+name = "futex"
+display_name = "Futex"
+target = "futex_test"
+
+[[test_firmware.cases]]
+name = "locks"
+display_name = "Locks"
+target = "locks_test"
+
+[[test_firmware.cases]]
+name = "list"
+display_name = "List"
+target = "list_test"
+
+[[test_firmware.cases]]
+name = "eventgroup"
+display_name = "Event groups"
+target = "eventgroup_test"
+
+[[test_firmware.cases]]
+name = "multiwaiter"
+display_name = "Multiwatier"
+target = "multiwaiter_test"
+
+[[test_firmware.cases]]
+name = "allocator"
+display_name = "Allocator"
+target = "allocator_test"
+
+[[test_firmware.cases]]
+name = "bitpacks"
+target = "bitpacks_test"
+
+[[test_firmware.cases]]
+name = "time"
+target = "time_test"
+
+[[firmwares]]
+name = "test-suite"
+libraries = ["thread_pool", "debug", "freestanding"]
+services = ["test_runner"]
+[[firmwares.threads]]
+name = "test-runner"
+compartment = "test_runner"
+entry = "run_tests"
+priority = 3
+stack_size = 0x800
+trusted_stack_frames = 9
+
+[[firmwares.threads]]
+name = "thread-pool-1"
+compartment = "thread_pool"
+entry = "thread_pool_run"
+priority = 2
+stack_size = 0x600
+trusted_stack_frames = 8
+
+[[firmwares.threads]]
+name = "thread-pool-2"
+compartment = "thread_pool"
+entry = "thread_pool_run"
+priority = 1
+stack_size = 0x600
+trusted_stack_frames = 8

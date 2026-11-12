@@ -1,0 +1,10 @@
+# A Sonata 0.2 board. Pair with the sonata-0.2 board, which selects the legacy UF2
+# layout. The drive is found by its label wherever it is mounted; use
+# --to DIR to copy somewhere else.
+description = "Sonata 0.2 board over its USB mass-storage bootloader"
+
+[package]
+format = "uf2"
+
+[flash]
+volume = "SONATA"

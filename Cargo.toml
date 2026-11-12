@@ -1,41 +1,42 @@
-# Copyright 3bian Limited and Contributors
-# SPDX-License-Identifier: MIT
-
 [package]
-name = "cheriot-vm"
+name = "cheriot"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "MIT"
-description = "A modular RISC-V and CHERIoT emulator written in Rust"
-readme = "README.md"
-
-[features]
-default = []
-gdb = ["dep:gdbstub"]
-verification = []
+description = "CHERIoT firmware tooling"
 
 [dependencies]
+clap = { version = "4.5", features = ["derive"] }
 elf = { version = "0.8", default-features = false }
 gdbstub = { version = "0.7.10", optional = true, default-features = false, features = ["paranoid_unsafe", "std"] }
+gimli = { version = "0.31", default-features = false, features = ["read", "std"] }
+object = { version = "0.36", features = ["read"] }
 serde = { version = "1.0.229", features = ["derive"] }
-toml = { version = "0.8", default-features = false, features = ["parse"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+serde_path_to_error = "0.1"
+sha1 = "0.10"
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+toml = "0.9"
+toml_edit = "0.23"
 
+# Terminals, descriptors and polling are the same on every Unix system.
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31", default-features = false, features = ["fs", "net", "poll", "term"] }
+
+# Kernel interfaces that only Linux has: GPIO character devices, i2c-dev, spidev, TAP.
 [target.'cfg(target_os = "linux")'.dependencies]
 gpiocdev = { version = "0.8", default-features = false, features = ["uapi_v2"] }
 i2cdev = "0.6.2"
-nix = { version = "0.31", default-features = false, features = ["fs", "net", "poll", "term"] }
 spidev = "0.7.1"
 tun = { version = "0.8.14", default-features = false }
 
+[features]
+default = ["gdb"]
+gdb = ["dep:gdbstub"]
+verification = []
+
 [profile.release]
-codegen-units = 1
-lto = "thin"
 overflow-checks = true
-
-[[test]]
-name = "cheriot1"
-path = "tests/cheriot.rs"
-
-[[test]]
-name = "cheriot_spec_contract"
-path = "tests/cheriot/spec_contract.rs"
+lto = "thin"

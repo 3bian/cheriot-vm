@@ -1,0 +1,34 @@
+# Copyright Microsoft and CHERIoT Contributors.
+# SPDX-License-Identifier: MIT
+
+
+[workspace.projects]
+audit = "examples/10.audit/cheriot.toml"
+benchmark-allocation = "benchmarks/allocation/cheriot.toml"
+benchmark-compartment-call = "benchmarks/compartment-call/cheriot.toml"
+benchmark-interrupt-latency = "benchmarks/interrupt-latency/cheriot.toml"
+benchmark-interrupt-latency-ext = "benchmarks/interrupt-latency-ext/cheriot.toml"
+benchmark-stack-usage = "benchmarks/stack-usage/cheriot.toml"
+error-handling = "examples/07.error_handling/cheriot.toml"
+exercise-compartmentalisation = "exercises/01.compartmentalisation/cheriot.toml"
+hello-compartment = "examples/02.hello_compartment/cheriot.toml"
+hello-safe-compartment = "examples/03.hello_safe_compartment/cheriot.toml"
+hello-world = "examples/01.hello_world/cheriot.toml"
+javascript = "examples/09.javascript/cheriot.toml"
+memory-safety = "examples/08.memory_safety/cheriot.toml"
+producer-consumer = "examples/06.producer-consumer/cheriot.toml"
+sealing = "examples/05.sealing/cheriot.toml"
+temporal-safety = "examples/04.temporal_safety/cheriot.toml"
+test-hardware-revoker-irqs = "tests.extra/hardware_revoker_IRQs/cheriot.toml"
+test-keep-ticking = "tests.extra/keep_ticking/cheriot.toml"
+test-regress-double-ref-shared = "tests.extra/regress-double_ref_shared/cheriot.toml"
+test-regress-thread-exit-irq = "tests.extra/regress-thread_exit_IRQ/cheriot.toml"
+tests = "tests/cheriot.toml"
+
+# The examples, tests and benchmarks belong to the same component as the SDK.
+[metadata]
+name = "cheriot-rtos"
+supplier = "Microsoft and CHERIoT Contributors"
+license = "MIT"
+description = "CHERIoT RTOS SDK"
+repository = "https://github.com/CHERIoT-Platform/cheriot-rtos"

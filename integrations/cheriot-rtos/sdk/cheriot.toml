@@ -1,0 +1,81 @@
+# Copyright Microsoft and CHERIoT Contributors.
+# SPDX-License-Identifier: MIT
+
+include = [
+    "lib/cheriot.toml",
+]
+
+[sdk_compatibility]
+integration = "CHERIoT RTOS"
+required_directories = ["include", "include/c++-config", "include/libc++"]
+required_files = [
+    { contains = "__cheri_compartment", path = "include/cdefs.h" },
+    { contains = "SCHEDULER_MULTIWAITER", path = "core/scheduler/main.cc" },
+    { contains = "__Z26compartment_switcher_entryz", path = "core/switcher/entry.S" },
+    { path = "core/loader/boot.S" },
+    { path = "core/loader/boot.cc" },
+    { path = "core/loader/loader.ldscript" },
+    { path = "core/token_library/token_unseal.S" },
+    { path = "compartment.ldscript" },
+    { path = "library.ldscript" },
+    { path = "privileged-compartment.ldscript" },
+    { path = "include/magic_enum/magic_enum.hpp" },
+]
+
+# Identifies the SDK and the third-party code it carries, for `cheriot config sbom`.
+# Add `version` (and `purl`) entries for the revisions you ship.
+[metadata]
+name = "cheriot-rtos"
+supplier = "Microsoft and CHERIoT Contributors"
+license = "MIT"
+description = "CHERIoT RTOS SDK"
+repository = "https://github.com/CHERIoT-Platform/cheriot-rtos"
+
+[[metadata.third_party]]
+path = "third_party/compiler-rt"
+name = "compiler-rt"
+supplier = "LLVM Project"
+license = "Apache-2.0 WITH LLVM-exception"
+description = "LLVM compiler-rt builtins"
+repository = "https://github.com/llvm/llvm-project"
+
+[[metadata.third_party]]
+path = "third_party/microvium"
+name = "microvium"
+supplier = "Michael Hunter"
+license = "MIT"
+description = "Microvium JavaScript engine"
+repository = "https://github.com/coder-mike/microvium"
+
+[[metadata.third_party]]
+path = "third_party/msun"
+name = "msun"
+supplier = "The FreeBSD Project"
+license = "BSD-2-Clause AND SunPro"
+description = "FreeBSD math library"
+repository = "https://github.com/freebsd/freebsd-src"
+
+[[metadata.third_party]]
+path = "include/libc++"
+name = "libc++"
+supplier = "LLVM Project"
+license = "Apache-2.0 WITH LLVM-exception"
+description = "LLVM C++ standard library headers"
+repository = "https://github.com/llvm/llvm-project"
+
+[[metadata.third_party]]
+path = "include/magic_enum"
+name = "magic_enum"
+supplier = "Daniil Goncharov"
+license = "MIT"
+description = "Static reflection for C++ enums"
+repository = "https://github.com/Neargye/magic_enum"
+
+# Present when the cheriot-vm integration is copied over the SDK.
+[[metadata.third_party]]
+path = "include/platform/cheriot-vm"
+name = "cheriot-vm-drivers"
+supplier = "3bian Limited and Contributors"
+license = "MIT"
+description = "Device drivers for the cheriot-vm board"
+repository = "https://github.com/3bian/cheriot-vm"

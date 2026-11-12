@@ -1,0 +1,40 @@
+# Copyright 3Bian Limited and Contributors.
+# SPDX-License-Identifier: MIT
+
+# The cheriot-vm board with its hardware revoker in use. The allocator starts
+# sweeps on the emulator's revoker device, through the RTOS driver for the Ibex
+# revoker, instead of running the software revoker. Everything else is as in
+# cheriot-vm.toml.
+name = "cheriot-vm-hardware-revoker"
+extends = "cheriot-vm.toml"
+
+[[patches]]
+op = "replace"
+path = "/revoker"
+value = "hardware"
+
+# The device is `[[revoker]]` in profiles/cheriot.toml, at the same address.
+[[patches]]
+op = "add"
+path = "/devices/revoker"
+
+[patches.value]
+length = 24
+start = 268451840
+
+# The revoker signals the end of a sweep with a pulse.
+[[patches]]
+op = "add"
+path = "/interrupts/-"
+
+[patches.value]
+edge_triggered = true
+name = "RevokerInterrupt"
+number = 7
+priority = 2
+
+# Searched last, so only platform-hardware_revoker.hh is taken from here.
+[[patches]]
+op = "add"
+path = "/driver_includes/-"
+value = "${sdk}/include/platform/ibex"

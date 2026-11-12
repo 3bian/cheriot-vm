@@ -1,0 +1,62 @@
+Usage: cheriot plan [OPTIONS]
+
+Show the commands a build would run, without running them.
+
+Options:
+  --board NAME|FILE
+    Board to build for: a [boards.NAME] table in cheriot.toml, NAME.toml in the
+    SDK's boards directory, or a board file. Defaults to the CHERIOT_BOARD
+    environment variable, else the board property in cheriot.toml.
+
+  --build-dir DIR
+    Directory for intermediate build files. Defaults to the CHERIOT_BUILD_DIR
+    environment variable, else the build_dir property in cheriot.toml, else
+    .cheriot in the project directory.
+
+  --color auto|always|never
+    Colour text output: auto (only on a terminal, and not when NO_COLOR is set),
+    always or never. Defaults to the global color setting, else auto.
+
+  --config FILE
+    Project configuration file. Defaults to the CHERIOT_CONFIG environment
+    variable, else cheriot.toml.
+
+  --firmware NAME
+    Firmware to select when the project defines several.
+
+  --format text|json|toml|shell|compilation-database
+    Output format; shell is a script that runs the plan, and
+    compilation-database is compile_commands.json for editors.
+
+  --mode debug|release
+    Build mode. Defaults to the CHERIOT_MODE environment variable, else the mode
+    property in cheriot.toml, else release.
+
+  --output FILE
+    Write the plan to a file.
+
+  --output-dir DIR
+    Directory for the published firmware. Defaults to the CHERIOT_OUTPUT_DIR
+    environment variable, else the output_dir property in cheriot.toml, else
+    target/BOARD/MODE in the project directory.
+
+  --overlay FILE
+    Configuration overlay to apply; repeat to add more.
+
+  --probe-toolchain
+    Run the compiler feature probes the plan depends on.
+
+  --project NAME
+    Project to select, when the configuration file is a workspace of several.
+
+  --toolchain-dir DIR
+    Directory containing the CHERIoT LLVM tools. Defaults to the
+    CHERIOT_TOOLCHAIN_DIR environment variable, else the toolchain_dir property
+    in cheriot.toml, else the global toolchain_dir setting, else the first
+    directory on PATH that holds them.
+
+  --version
+    Print the version and exit.
+
+  -h, --help
+    Display this help and exit.

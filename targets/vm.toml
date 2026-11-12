@@ -1,0 +1,10 @@
+# The built-in emulator. Select with `--target vm` or `target = "vm"`.
+description = "Built-in cheriot emulator"
+
+[exec]
+emulator = true
+profile = "../profiles/cheriot.toml"
+
+[debug]
+emulator = true
+profile = "../profiles/cheriot.toml"

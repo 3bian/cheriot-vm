@@ -1,0 +1,5 @@
+# The Sonata simulator started by the SDK's script. Pair with the sonata-simulator board.
+description = "Sonata simulator"
+
+[exec]
+command = ["${sdk}/scripts/run-sonata-sim.sh", "${firmware}"]

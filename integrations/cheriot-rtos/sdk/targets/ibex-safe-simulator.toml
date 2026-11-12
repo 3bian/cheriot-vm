@@ -1,0 +1,10 @@
+# Microsoft's CHERIoT Ibex SAFE simulator. It reads the memory images that the board's
+# microsoft_safe packaging writes into the build directory. Pair with the
+# ibex-safe-simulator board. CHERIOT_MSFT_SAFE_SIM may name the simulator.
+description = "CHERIoT Ibex SAFE simulator"
+
+[exec]
+command = [
+    "sh", "-c", "sim=$CHERIOT_MSFT_SAFE_SIM; [ -n \"$sim\" ] || sim=cheriot_ibex_safe_sim; cd \"$1\" && exec \"$sim\"",
+    "sh", "${build_dir}",
+]

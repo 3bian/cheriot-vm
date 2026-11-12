@@ -1,0 +1,58 @@
+# Copyright 3bian Limited and Contributors
+# SPDX-License-Identifier: MIT
+
+[machine]
+name = "rv32imc"
+timing = "elapsed"
+timer_hz = 2000
+
+[processor]
+type = "rv32imc"
+
+[[memory]]
+name = "ram0"
+type = "ram"
+base = 0x80000000
+size = 0x04000000
+
+[[timer64]]
+name = "timer0"
+base = 0x02000000
+
+[[interrupt-controller]]
+name = "interrupts"
+base = 0x0c000000
+
+[[uart]]
+name = "uart0"
+base = 0x10000000
+interrupt_source = 1
+
+[[gpio]]
+name = "gpio0"
+base = 0x10003000
+interrupt_source = 2
+
+[[spi]]
+name = "spi0"
+base = 0x10001000
+attached_device = "loopback"
+interrupt_source = 3
+
+[[i2c]]
+name = "i2c0"
+base = 0x10002000
+attached_device = "eeprom"
+interrupt_source = 4
+
+[[ethernet]]
+name = "ethernet0"
+base = 0x20000000
+interrupt_source = 5
+
+[[storage]]
+name = "storage0"
+base = 0x30000000
+sectors = 32
+read_only = false
+interrupt_source = 6

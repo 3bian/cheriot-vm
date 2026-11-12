@@ -1,0 +1,59 @@
+Usage: cheriot COMMAND [OPTIONS]
+
+CHERIoT firmware development tools.
+
+Commands:
+  build
+    Build the selected project's firmware.
+
+  clean
+    Remove the files a build of the selected project wrote.
+
+  config
+    Inspect or modify a project's configuration, or your own global settings.
+
+  debug
+    Debug firmware on a target; the built-in emulator and a GDB server by
+    default.
+
+  diagnose
+    Check the configuration and the CHERIoT toolchain, and say what is wrong.
+
+  exec
+    Execute firmware on a target; the built-in emulator by default.
+
+  flash
+    Build and package firmware, then write it to a board.
+
+  init
+    Create a new project from a template folder.
+
+  inspect
+    Report what an ELF file contains, without running it.
+
+  package
+    Build firmware and package it as the target or the board requires.
+
+  plan
+    Show the commands a build would run, without running them.
+
+  size
+    Build firmware and report its section sizes.
+
+  test
+    Build, execute and check firmware against the project's test settings.
+
+Options:
+  --color auto|always|never
+    Colour text output: auto (only on a terminal, and not when NO_COLOR is set),
+    always or never. Defaults to the global color setting, else auto.
+
+  --config FILE
+    Project configuration file. Defaults to the CHERIOT_CONFIG environment
+    variable, else cheriot.toml.
+
+  --version
+    Print the version and exit.
+
+  -h, --help
+    Display this help and exit.

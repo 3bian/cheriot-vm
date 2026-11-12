@@ -1,6 +1,3 @@
-# Copyright 3bian Limited and Contributors
-# SPDX-License-Identifier: MIT
-
 [toolchain]
 channel = "1.99.1"
 profile = "minimal"

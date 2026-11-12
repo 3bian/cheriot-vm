@@ -1,0 +1,6 @@
+# The CHERIoT Sail reference simulator. `cheriot_sim` must be on PATH.
+# Pair with the sail board.
+description = "CHERIoT Sail reference simulator"
+
+[exec]
+command = ["cheriot_sim", "${firmware}"]

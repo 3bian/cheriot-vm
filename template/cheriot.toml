@@ -1,0 +1,50 @@
+schema = 1
+
+name = "{{name}}"
+sdk = "{{sdk}}"
+board = "{{board}}"
+include = [
+    "{{sdk}}/cheriot.toml",
+]
+
+# Identifies this project in `cheriot config sbom`.
+[metadata]
+name = "{{name}}"
+version = "0.1.0"
+
+[services.hello]
+dependencies = [
+    "freestanding",
+    "debug",
+]
+kind = "compartment"
+
+[services.hello.build]
+sources = [
+    "src/hello.cc",
+]
+
+[[firmwares]]
+name = "{{name}}"
+libraries = []
+services = [
+    "hello",
+]
+
+[[firmwares.threads]]
+name = "hello"
+compartment = "hello"
+entry = "say_hello"
+priority = 1
+stack_size = 1024
+trusted_stack_frames = 2
+
+# `cheriot test` builds the firmware, runs it and checks its output.
+[test]
+timeout = 60
+pass = ["Hello world"]
+fail = ["Assertion failure"]
+
+# Where `exec`, `debug`, `test` and `flash` run. Add `target = "NAME"` at the top of
+# this file to choose a default, a [targets.NAME] table for a target of your own, and
+# a [profiles.NAME] table to keep the emulator's machine profile in this file.

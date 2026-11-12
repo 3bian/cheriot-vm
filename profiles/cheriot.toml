@@ -29,6 +29,13 @@ layout = "16550"
 name = "uart0"
 base = 0x10000000
 
+# The background revoker. Firmware built for a board with `revoker = "hardware"`
+# starts sweeps on it; other firmware never touches it.
+[[revoker]]
+name = "revoker0"
+base = 0x10004000
+interrupt_source = 7
+
 [[gpio]]
 name = "gpio0"
 base = 0x10003000
